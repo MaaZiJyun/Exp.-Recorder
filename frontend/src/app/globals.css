@@ -131,6 +131,20 @@ td small { margin-top: 3px; color: var(--muted); font-size: 9px; }
 .table-status.failed { color: #b43d32; }
 .muted { color: #a1a49f; }
 .empty-table { height: 160px; text-align: center; color: var(--muted); }
+.row-actions { display: flex; gap: 5px; }
+.row-actions button { min-width: 42px; height: 27px; padding: 0 7px; border: 1px solid var(--line); color: var(--ink); background: #fff; font: 700 8px/1 "SF Mono", monospace; }
+.row-actions button:hover:not(:disabled) { color: var(--green); border-color: var(--green); }
+.row-actions .row-delete { color: #a93f36; border-color: #e1b6ae; background: #fff8f6; }
+.row-actions .row-delete:hover:not(:disabled) { color: #fff; border-color: #a93f36; background: #a93f36; }
+.row-actions .row-save { color: #fff; border-color: var(--green); background: var(--green); }
+.editing-row { background: #fff9e9; cursor: default; }
+.editing-row:hover { background: #fff9e9; }
+.editing-row td { padding: 8px 5px; vertical-align: top; }
+.editing-row input, .editing-row select { width: 100%; min-width: 72px; height: 29px; padding: 0 6px; border: 1px solid var(--line); color: var(--ink); background: #fff; font-size: 10px; outline: none; }
+.editing-row input:focus, .editing-row select:focus { border-color: var(--green); }
+.stimulus-edit { width: 270px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px; }
+.stimulus-edit select { grid-column: 1 / -1; }
+.response-edit { width: 145px; display: grid; gap: 4px; }
 .annotation-drawer { padding: 16px 18px 18px; background: #faf8f2; }
 .annotation-title { display: flex; justify-content: space-between; align-items: center; margin-bottom: 13px; }
 .annotation-title h3 { margin: 0; font: 600 15px/1.2 Georgia, serif; }

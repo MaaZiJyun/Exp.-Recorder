@@ -30,6 +30,22 @@ type Trial = {
   response_degree: number | null;
 };
 
+type RowEdit = {
+  subject_id: string;
+  trial_no: string;
+  experiment_timestamp: string;
+  stimulation_position: string;
+  stimulation_waveform: string;
+  stimulation_high_level_v: string;
+  stimulation_low_level_v: string;
+  stimulation_duty_cycle_pct: string;
+  stimulation_frequency_hz: string;
+  response_latency_s: string;
+  response_action: string;
+  response_degree: string;
+  status: string;
+};
+
 type TaskState = {
   task_id: string | null;
   status: "IDLE" | "RUNNING" | "COMPLETED" | "FAILED";
@@ -144,6 +160,10 @@ export default function Home() {
   const [saving, setSaving] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [rowEdit, setRowEdit] = useState<RowEdit | null>(null);
+  const [rowSaving, setRowSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
   const [notice, setNotice] = useState<{ kind: "error" | "success"; text: string } | null>(null);
   const [previewTick, setPreviewTick] = useState(0);
   const previousTaskStatus = useRef(task.status);
@@ -271,6 +291,75 @@ export default function Home() {
       action: trial.response_action ?? "",
       degree: trial.response_degree?.toString() ?? "",
     });
+  };
+
+  const beginRowEdit = (trial: Trial) => {
+    setEditingId(trial.trial_id);
+    setRowEdit({
+      subject_id: trial.subject_id,
+      trial_no: String(trial.trial_no),
+      experiment_timestamp: trial.experiment_timestamp ?? "",
+      stimulation_position: trial.stimulation_position ?? "",
+      stimulation_waveform: trial.stimulation_waveform ?? "SQUARE",
+      stimulation_high_level_v: String(trial.stimulation_high_level_v ?? trial.stimulation_voltage_v),
+      stimulation_low_level_v: String(trial.stimulation_low_level_v ?? 0),
+      stimulation_duty_cycle_pct: String(trial.stimulation_duty_cycle_pct ?? 50),
+      stimulation_frequency_hz: String(trial.stimulation_frequency_hz),
+      response_latency_s: trial.response_latency_s?.toString() ?? "",
+      response_action: trial.response_action ?? "",
+      response_degree: trial.response_degree?.toString() ?? "",
+      status: trial.status,
+    });
+  };
+
+  const setRowField = (key: keyof RowEdit, value: string) => {
+    setRowEdit((current) => current ? { ...current, [key]: value } : current);
+  };
+
+  const saveRowEdit = async () => {
+    if (editingId === null || !rowEdit) return;
+    setRowSaving(true);
+    try {
+      await api(`/trials/${editingId}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          ...rowEdit,
+          trial_no: Number(rowEdit.trial_no),
+          stimulation_high_level_v: Number(rowEdit.stimulation_high_level_v),
+          stimulation_low_level_v: Number(rowEdit.stimulation_low_level_v),
+          stimulation_duty_cycle_pct: Number(rowEdit.stimulation_duty_cycle_pct),
+          stimulation_frequency_hz: Number(rowEdit.stimulation_frequency_hz),
+          response_latency_s: numberOrNull(rowEdit.response_latency_s),
+          response_action: rowEdit.response_action.trim() || null,
+          response_degree: numberOrNull(rowEdit.response_degree),
+        }),
+      });
+      await loadTrials(filterRef.current);
+      if (selected?.trial_id === editingId) setSelected(null);
+      setEditingId(null);
+      setRowEdit(null);
+      setNotice({ kind: "success", text: `Trial #${editingId} 已更新。` });
+    } catch (error) {
+      setNotice({ kind: "error", text: error instanceof Error ? error.message : "更新失败" });
+    } finally {
+      setRowSaving(false);
+    }
+  };
+
+  const deleteRow = async (trial: Trial) => {
+    if (!window.confirm(`确定删除 Trial #${trial.trial_id}？录像文件将保留。`)) return;
+    setDeletingId(trial.trial_id);
+    try {
+      await api(`/trials/${trial.trial_id}`, { method: "DELETE" });
+      if (selected?.trial_id === trial.trial_id) setSelected(null);
+      if (editingId === trial.trial_id) { setEditingId(null); setRowEdit(null); }
+      await loadTrials(filterRef.current);
+      setNotice({ kind: "success", text: `Trial #${trial.trial_id} 已删除，录像文件已保留。` });
+    } catch (error) {
+      setNotice({ kind: "error", text: error instanceof Error ? error.message : "删除失败" });
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   const saveAnnotation = async () => {
@@ -467,9 +556,20 @@ export default function Home() {
             </div>
             <div className="table-wrap">
               <table>
-                <thead><tr><th>TRIAL</th><th>SUBJECT</th><th>STIMULUS</th><th>POSITION</th><th>RECORDED</th><th>STATUS</th><th>RESPONSE</th></tr></thead>
+                <thead><tr><th>TRIAL</th><th>SUBJECT</th><th>STIMULUS</th><th>POSITION</th><th>RECORDED</th><th>STATUS</th><th>RESPONSE</th><th>ACTIONS</th></tr></thead>
                 <tbody>
-                  {trials.map((trial) => (
+                  {trials.map((trial) => editingId === trial.trial_id && rowEdit ? (
+                    <tr key={trial.trial_id} className="editing-row">
+                      <td><input aria-label="Trial number" type="number" min="1" value={rowEdit.trial_no} onChange={(e) => setRowField("trial_no", e.target.value)} /><small>#{trial.trial_id}</small></td>
+                      <td><input aria-label="Subject ID" value={rowEdit.subject_id} onChange={(e) => setRowField("subject_id", e.target.value)} /></td>
+                      <td><div className="stimulus-edit"><select aria-label="Waveform" value={rowEdit.stimulation_waveform} onChange={(e) => setRowField("stimulation_waveform", e.target.value)}><option>SQUARE</option><option>PULSE</option><option>SINE</option><option>RAMP</option></select><input aria-label="Frequency Hz" type="number" step="any" min="0.001" value={rowEdit.stimulation_frequency_hz} onChange={(e) => setRowField("stimulation_frequency_hz", e.target.value)} /><input aria-label="Low level V" type="number" step="any" value={rowEdit.stimulation_low_level_v} onChange={(e) => setRowField("stimulation_low_level_v", e.target.value)} /><input aria-label="High level V" type="number" step="any" value={rowEdit.stimulation_high_level_v} onChange={(e) => setRowField("stimulation_high_level_v", e.target.value)} /><input aria-label="Duty cycle percent" type="number" step="any" min="0.1" max="99.9" value={rowEdit.stimulation_duty_cycle_pct} onChange={(e) => setRowField("stimulation_duty_cycle_pct", e.target.value)} /></div></td>
+                      <td><input aria-label="Position" value={rowEdit.stimulation_position} onChange={(e) => setRowField("stimulation_position", e.target.value)} /></td>
+                      <td><input aria-label="Recorded timestamp" value={rowEdit.experiment_timestamp} onChange={(e) => setRowField("experiment_timestamp", e.target.value)} /></td>
+                      <td><select aria-label="Status" value={rowEdit.status} onChange={(e) => setRowField("status", e.target.value)}><option>COMPLETED</option><option>FAILED</option><option>ABORTED</option></select></td>
+                      <td><div className="response-edit"><input aria-label="Latency seconds" type="number" min="0" step="any" placeholder="Latency" value={rowEdit.response_latency_s} onChange={(e) => setRowField("response_latency_s", e.target.value)} /><select aria-label="Action code" value={rowEdit.response_action} onChange={(e) => setRowField("response_action", e.target.value)}><option value="">No action</option>{responseActions.map((action) => <option key={action.code} value={action.code}>{action.code} · {action.zh}</option>)}</select><select aria-label="Response degree" value={rowEdit.response_degree} onChange={(e) => setRowField("response_degree", e.target.value)}><option value="">No degree</option>{responseDegrees.map((degree) => <option key={degree.score} value={degree.score}>{degree.score} · {degree.level}</option>)}</select></div></td>
+                      <td><div className="row-actions"><button className="row-save" onClick={() => void saveRowEdit()} disabled={rowSaving}>{rowSaving ? "…" : "保存"}</button><button onClick={() => { setEditingId(null); setRowEdit(null); }} disabled={rowSaving}>取消</button></div></td>
+                    </tr>
+                  ) : (
                     <tr key={trial.trial_id} onClick={() => chooseTrial(trial)} className={selected?.trial_id === trial.trial_id ? "selected" : ""}>
                       <td><strong>T{String(trial.trial_no).padStart(3, "0")}</strong><small>#{trial.trial_id}</small></td>
                       <td>{trial.subject_id}</td>
@@ -478,9 +578,10 @@ export default function Home() {
                       <td>{trial.experiment_timestamp?.slice(0, 16) ?? "—"}</td>
                       <td><span className={`table-status ${trial.status.toLowerCase()}`}>{trial.status}</span></td>
                       <td>{trial.response_action !== null ? <><strong>{actionLabel(trial.response_action)}</strong><small>{degreeLabel(trial.response_degree)}</small></> : <span className="muted">Not tagged</span>}</td>
+                      <td><div className="row-actions"><button onClick={(e) => { e.stopPropagation(); beginRowEdit(trial); }} disabled={running || editingId !== null}>编辑</button><button className="row-delete" onClick={(e) => { e.stopPropagation(); void deleteRow(trial); }} disabled={running || deletingId === trial.trial_id || editingId !== null}>{deletingId === trial.trial_id ? "…" : "删除"}</button></div></td>
                     </tr>
                   ))}
-                  {trials.length === 0 && <tr><td className="empty-table" colSpan={7}>No trial records found.</td></tr>}
+                  {trials.length === 0 && <tr><td className="empty-table" colSpan={8}>No trial records found.</td></tr>}
                 </tbody>
               </table>
             </div>

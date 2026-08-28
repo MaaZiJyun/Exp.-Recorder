@@ -59,6 +59,42 @@ class TestExperimentController(unittest.TestCase):
         self.assertEqual(self.controller.db.list_trials(), [])
         self.assertEqual(self.controller.current_task()["status"], "IDLE")
 
+    def test_update_and_delete_single_trial(self):
+        self.controller.db.upsert_subject("EDIT01")
+        trial_id = self.controller.db.insert_trial({
+            "subject_id": "EDIT01",
+            "trial_no": 1,
+            "video_id": "EDIT01_T001_TEST",
+            "experiment_timestamp": "2026-08-28 12:00:00",
+            "video_file": "EDIT01_T001_TEST.webm",
+            "stimulation_position": "Head",
+            "stimulation_voltage_v": 2.0,
+            "stimulation_waveform": "SQUARE",
+            "stimulation_high_level_v": 2.0,
+            "stimulation_low_level_v": 0.0,
+            "stimulation_duty_cycle_pct": 50.0,
+            "stimulation_frequency_hz": 50.0,
+            "stimulation_duration_s": 0.5,
+            "stimulation_count": 1,
+            "stimulation_interval_s": 1.0,
+            "status": "COMPLETED",
+        })
+
+        updated = self.controller.db.update_trial(trial_id, {
+            "stimulation_position": "Tail",
+            "stimulation_frequency_hz": 200.0,
+            "response_action": "2",
+        })
+        self.assertTrue(updated)
+        row = self.controller.db.list_trials()[0]
+        self.assertEqual(row["stimulation_position"], "Tail")
+        self.assertEqual(row["stimulation_frequency_hz"], 200.0)
+        self.assertEqual(row["response_action"], "2")
+
+        self.assertTrue(self.controller.db.delete_trial(trial_id))
+        self.assertEqual(self.controller.db.list_trials(), [])
+        self.assertIsNotNone(self.controller.db.get_subject("EDIT01"))
+
 
 if __name__ == "__main__":
     unittest.main()

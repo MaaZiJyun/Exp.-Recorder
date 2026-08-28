@@ -52,6 +52,24 @@ class AnnotationRequest(BaseModel):
     response_degree: Optional[float] = None
 
 
+class TrialUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    subject_id: str = Field(min_length=1, max_length=120)
+    trial_no: int = Field(ge=1)
+    experiment_timestamp: str = Field(min_length=1, max_length=40)
+    stimulation_position: str = Field(max_length=120)
+    stimulation_waveform: str = Field(min_length=1, max_length=40)
+    stimulation_high_level_v: float
+    stimulation_low_level_v: float
+    stimulation_duty_cycle_pct: float = Field(gt=0, lt=100)
+    stimulation_frequency_hz: float = Field(gt=0)
+    response_latency_s: Optional[float] = Field(default=None, ge=0)
+    response_action: Optional[str] = Field(default=None, max_length=120)
+    response_degree: Optional[float] = Field(default=None, ge=0, le=3)
+    status: str = Field(pattern="^(RUNNING|COMPLETED|FAILED|ABORTED)$")
+
+
 class ExperimentController:
     """Owns hardware connections and the single active trial task."""
 
@@ -315,6 +333,29 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
         if not updated:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trial not found")
         return {"updated": True}
+
+    @app.put("/api/trials/{trial_id}")
+    def update_trial(trial_id: int, request: TrialUpdateRequest) -> dict[str, bool]:
+        if controller.current_task()["status"] == "RUNNING":
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="实验运行中，不能编辑记录。")
+        subject_id = request.subject_id.strip()
+        controller.db.upsert_subject(subject_id)
+        values = request.model_dump()
+        values["subject_id"] = subject_id
+        values["stimulation_voltage_v"] = request.stimulation_high_level_v - request.stimulation_low_level_v
+        updated = controller.db.update_trial(trial_id, values)
+        if not updated:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trial not found")
+        return {"updated": True}
+
+    @app.delete("/api/trials/{trial_id}")
+    def delete_trial(trial_id: int) -> dict[str, bool]:
+        if controller.current_task()["status"] == "RUNNING":
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="实验运行中，不能删除记录。")
+        deleted = controller.db.delete_trial(trial_id)
+        if not deleted:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trial not found")
+        return {"deleted": True}
 
     @app.delete("/api/data")
     def clear_data() -> dict[str, int]:

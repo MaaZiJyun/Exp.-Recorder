@@ -116,6 +116,32 @@ class DatabaseManager:
             conn.commit()
             return cursor.rowcount > 0
 
+    def update_trial(self, trial_id: int, trial_data: Dict[str, Any]) -> bool:
+        """Update the editable fields of one trial while preserving its video identity."""
+        allowed = (
+            "subject_id", "trial_no", "experiment_timestamp", "stimulation_position",
+            "stimulation_waveform", "stimulation_high_level_v", "stimulation_low_level_v",
+            "stimulation_duty_cycle_pct", "stimulation_voltage_v",
+            "stimulation_frequency_hz", "response_latency_s", "response_action",
+            "response_degree", "status",
+        )
+        values = {key: trial_data[key] for key in allowed if key in trial_data}
+        if not values:
+            return False
+        assignments = ", ".join(f"{key} = ?" for key in values)
+        query = f"UPDATE trials SET {assignments} WHERE trial_id = ?"
+        with self.get_connection() as conn:
+            cursor = conn.execute(query, (*values.values(), trial_id))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def delete_trial(self, trial_id: int) -> bool:
+        """Delete one database row without deleting its video file."""
+        with self.get_connection() as conn:
+            cursor = conn.execute("DELETE FROM trials WHERE trial_id = ?", (trial_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+
     def list_trials(self, subject_id: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
         if subject_id:
             query = """

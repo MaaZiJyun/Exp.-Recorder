@@ -9,7 +9,7 @@ from typing import Any, Optional
 class WebmVideoWriter:
     """Decode incoming JPEG frames and encode a browser-native, silent WebM."""
 
-    def __init__(self, path: Path, width: int = 320, height: int = 240, fps: int = 15):
+    def __init__(self, path: Path, width: int = 640, height: int = 480, fps: int = 15):
         self.path = Path(path)
         self.width = width
         self.height = height

@@ -28,6 +28,7 @@ from src.devices.xiao_camera import XiaoCameraDriver
 class TrialRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    experiment_id: Optional[int] = Field(default=None, ge=1)
     subject_id: str
     body_length_cm: Optional[float] = None
     body_weight_g: Optional[float] = None
@@ -52,9 +53,17 @@ class AnnotationRequest(BaseModel):
     response_degree: Optional[float] = None
 
 
+class ExperimentRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    title: str = Field(min_length=1, max_length=200)
+    description: Optional[str] = Field(default=None, max_length=2000)
+
+
 class TrialUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    experiment_id: Optional[int] = Field(default=None, ge=1)
     subject_id: str = Field(min_length=1, max_length=120)
     trial_no: int = Field(ge=1)
     experiment_timestamp: str = Field(min_length=1, max_length=40)
@@ -129,6 +138,11 @@ class ExperimentController:
                 raise RuntimeError("已有实验正在运行。")
             if not self.sdg.is_connected or not self.camera.is_connected:
                 raise RuntimeError("硬件未就绪，请先连接两个设备。")
+            if (
+                request.experiment_id is not None
+                and self.db.get_experiment(request.experiment_id) is None
+            ):
+                raise ValueError(f"Experiment ID {request.experiment_id} 不存在。")
 
             subject = Subject(
                 subject_id=request.subject_id.strip(),
@@ -137,7 +151,11 @@ class ExperimentController:
             )
             trial_config = TrialConfig(
                 subject=subject,
-                trial_no=self.db.get_next_trial_no(subject.subject_id),
+                trial_no=self.db.get_next_trial_no(
+                    subject.subject_id,
+                    request.experiment_id,
+                ),
+                experiment_id=request.experiment_id,
                 stimulus=StimulusConfig(
                     voltage_v=request.high_level_v - request.low_level_v,
                     waveform=request.waveform,
@@ -215,7 +233,7 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
         CORSMiddleware,
         allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
         allow_credentials=False,
-        allow_methods=["GET", "POST", "PATCH", "DELETE"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
         allow_headers=["Content-Type"],
     )
 
@@ -267,12 +285,60 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subject not found")
         return record
 
+    @app.get("/api/experiments")
+    def experiments() -> list[dict[str, Any]]:
+        return controller.db.list_experiments()
+
+    @app.post("/api/experiments", status_code=status.HTTP_201_CREATED)
+    def create_experiment(request: ExperimentRequest) -> dict[str, Any]:
+        experiment_id = controller.db.insert_experiment(
+            request.title,
+            request.description or None,
+        )
+        return controller.db.get_experiment(experiment_id) or {}
+
+    @app.get("/api/experiments/{experiment_id}")
+    def experiment(experiment_id: int) -> dict[str, Any]:
+        record = controller.db.get_experiment(experiment_id)
+        if record is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Experiment not found")
+        return record
+
+    @app.put("/api/experiments/{experiment_id}")
+    def update_experiment(experiment_id: int, request: ExperimentRequest) -> dict[str, Any]:
+        updated = controller.db.update_experiment(
+            experiment_id,
+            request.title,
+            request.description or None,
+        )
+        if not updated:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Experiment not found")
+        return controller.db.get_experiment(experiment_id) or {}
+
+    @app.delete("/api/experiments/{experiment_id}")
+    def delete_experiment(experiment_id: int) -> dict[str, bool]:
+        record = controller.db.get_experiment(experiment_id)
+        if record is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Experiment not found")
+        if record["trial_count"]:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="请先删除该 Experiment 中的所有 Trial。",
+            )
+        controller.db.delete_experiment(experiment_id)
+        return {"deleted": True}
+
     @app.get("/api/trials")
     def trials(
         subject_id: Optional[str] = None,
+        experiment_id: Optional[int] = Query(default=None, ge=1),
         limit: int = Query(default=50, ge=1, le=200),
     ) -> list[dict[str, Any]]:
-        return controller.db.list_trials(subject_id=subject_id, limit=limit)
+        return controller.db.list_trials(
+            subject_id=subject_id,
+            experiment_id=experiment_id,
+            limit=limit,
+        )
 
     @app.get("/api/trials/{trial_id}/video")
     def trial_video(trial_id: int) -> FileResponse:
@@ -288,10 +354,17 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
         return FileResponse(video_path, media_type=media_type, filename=video_path.name)
 
     @app.get("/api/trials/export")
-    def export_trials(subject_id: Optional[str] = None) -> Response:
-        rows = controller.db.list_trials(subject_id=subject_id, limit=100_000)
+    def export_trials(
+        subject_id: Optional[str] = None,
+        experiment_id: Optional[int] = Query(default=None, ge=1),
+    ) -> Response:
+        rows = controller.db.list_trials(
+            subject_id=subject_id,
+            experiment_id=experiment_id,
+            limit=100_000,
+        )
         columns = [
-            "trial_id", "subject_id", "body_length_cm", "body_weight_g", "trial_no",
+            "trial_id", "experiment_id", "subject_id", "body_length_cm", "body_weight_g", "trial_no",
             "video_id", "experiment_timestamp", "video_file", "stimulation_time",
             "stimulation_position", "stimulation_waveform", "stimulation_high_level_v",
             "stimulation_low_level_v", "stimulation_duty_cycle_pct",
@@ -340,7 +413,7 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="实验运行中，不能编辑记录。")
         subject_id = request.subject_id.strip()
         controller.db.upsert_subject(subject_id)
-        values = request.model_dump()
+        values = request.model_dump(exclude_unset=True)
         values["subject_id"] = subject_id
         values["stimulation_voltage_v"] = request.stimulation_high_level_v - request.stimulation_low_level_v
         updated = controller.db.update_trial(trial_id, values)

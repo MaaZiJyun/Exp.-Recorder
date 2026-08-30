@@ -8,8 +8,16 @@ CREATE TABLE IF NOT EXISTS subjects (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS experiment (
+    experiment_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    description TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS trials (
     trial_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    experiment_id INTEGER,
     subject_id TEXT NOT NULL,
     trial_no INTEGER NOT NULL,
     video_id TEXT NOT NULL UNIQUE,
@@ -42,6 +50,7 @@ CREATE TABLE IF NOT EXISTS trials (
     error_message TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     
+    FOREIGN KEY (experiment_id) REFERENCES experiment (experiment_id),
     FOREIGN KEY (subject_id) REFERENCES subjects (subject_id)
 );
 

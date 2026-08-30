@@ -55,6 +55,7 @@ class TrialRunner:
         exp_timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
 
         result = TrialResult(
+            experiment_id=config.experiment_id,
             subject_id=config.subject.subject_id,
             trial_no=config.trial_no,
             video_id=video_id,

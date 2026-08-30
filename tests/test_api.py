@@ -24,9 +24,11 @@ class TestExperimentController(unittest.TestCase):
         devices = self.controller.connect_devices()
         self.assertTrue(devices["sdg_connected"])
         self.assertTrue(devices["camera_connected"])
+        experiment_id = self.controller.db.insert_experiment("Web API experiment")
 
         task = self.controller.start_trial(
             TrialRequest(
+                experiment_id=experiment_id,
                 subject_id="WEB01",
                 waveform="PULSE",
                 high_level_v=4.0,
@@ -46,6 +48,7 @@ class TestExperimentController(unittest.TestCase):
             state = self.controller.current_task()
 
         self.assertEqual(state["status"], "COMPLETED")
+        self.assertEqual(state["result"]["experiment_id"], experiment_id)
         self.assertEqual(state["result"]["subject_id"], "WEB01")
         self.assertEqual(state["result"]["stimulation_waveform"], "PULSE")
         self.assertEqual(state["result"]["stimulation_high_level_v"], 4.0)
@@ -56,6 +59,7 @@ class TestExperimentController(unittest.TestCase):
         cleared = self.controller.clear_data()
         self.assertEqual(cleared["trials_deleted"], 1)
         self.assertEqual(cleared["subjects_deleted"], 1)
+        self.assertEqual(cleared["experiments_deleted"], 1)
         self.assertEqual(self.controller.db.list_trials(), [])
         self.assertEqual(self.controller.current_task()["status"], "IDLE")
 
@@ -94,7 +98,6 @@ class TestExperimentController(unittest.TestCase):
         self.assertTrue(self.controller.db.delete_trial(trial_id))
         self.assertEqual(self.controller.db.list_trials(), [])
         self.assertIsNotNone(self.controller.db.get_subject("EDIT01"))
-
 
 if __name__ == "__main__":
     unittest.main()

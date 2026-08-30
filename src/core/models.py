@@ -48,6 +48,7 @@ class TimingConfig:
 class TrialConfig:
     subject: Subject
     trial_no: int
+    experiment_id: Optional[int] = None
     stimulus: StimulusConfig = field(default_factory=StimulusConfig)
     timing: TimingConfig = field(default_factory=TimingConfig)
 
@@ -109,6 +110,7 @@ class TrialConfig:
 @dataclass
 class TrialResult:
     trial_id: Optional[int] = None
+    experiment_id: Optional[int] = None
     subject_id: str = ""
     trial_no: int = 1
     video_id: str = ""

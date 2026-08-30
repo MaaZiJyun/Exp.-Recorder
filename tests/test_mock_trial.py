@@ -2,6 +2,7 @@
 
 import tempfile
 import unittest
+import sqlite3
 from pathlib import Path
 
 from src.database.db_manager import DatabaseManager
@@ -32,8 +33,15 @@ class TestExpRecorder(unittest.TestCase):
         # Next trial number
         self.assertEqual(self.db.get_next_trial_no("B07"), 1)
 
+        experiment_id = self.db.insert_experiment("Startle response", "Initial cohort")
+        experiment = self.db.get_experiment(experiment_id)
+        self.assertEqual(experiment["title"], "Startle response")
+        self.assertTrue(self.db.update_experiment(experiment_id, "Startle response v2", "Updated"))
+        self.assertEqual(self.db.get_experiment(experiment_id)["description"], "Updated")
+
         # Insert Trial
         trial_data = {
+            "experiment_id": experiment_id,
             "subject_id": "B07",
             "trial_no": 1,
             "video_id": "B07_T001_20260828_120000",
@@ -67,10 +75,20 @@ class TestExpRecorder(unittest.TestCase):
         self.assertEqual(len(trials), 1)
         self.assertEqual(trials[0]["response_action"], "C-start")
         self.assertEqual(trials[0]["response_latency_s"], 0.035)
+        self.assertEqual(trials[0]["experiment_id"], experiment_id)
+        self.assertEqual(trials[0]["experiment_title"], "Startle response v2")
+        self.assertEqual(len(self.db.list_trials(experiment_id=experiment_id)), 1)
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.delete_experiment(experiment_id)
 
         cleared = self.db.clear_all_data()
-        self.assertEqual(cleared, {"trials_deleted": 1, "subjects_deleted": 1})
+        self.assertEqual(cleared, {
+            "trials_deleted": 1,
+            "subjects_deleted": 1,
+            "experiments_deleted": 1,
+        })
         self.assertEqual(self.db.list_trials(), [])
+        self.assertEqual(self.db.list_experiments(), [])
         self.assertIsNone(self.db.get_subject("B07"))
 
     def test_full_mock_trial_execution(self):
@@ -117,6 +135,47 @@ class TestExpRecorder(unittest.TestCase):
         self.assertEqual(trials[0]["stimulation_high_level_v"], 3.0)
         self.assertEqual(trials[0]["stimulation_low_level_v"], 0.0)
         self.assertEqual(trials[0]["stimulation_duty_cycle_pct"], 50.0)
+
+    def test_existing_database_is_migrated_with_experiment_relation(self):
+        legacy_db = Path(self.tmp_dir.name) / "legacy.db"
+        with sqlite3.connect(legacy_db) as conn:
+            conn.executescript("""
+                CREATE TABLE subjects (subject_id TEXT PRIMARY KEY);
+                CREATE TABLE trials (
+                    trial_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    subject_id TEXT NOT NULL,
+                    trial_no INTEGER NOT NULL,
+                    video_id TEXT NOT NULL UNIQUE,
+                    experiment_timestamp TEXT NOT NULL,
+                    video_file TEXT NOT NULL,
+                    stimulation_voltage_v REAL NOT NULL,
+                    stimulation_frequency_hz REAL NOT NULL,
+                    stimulation_duration_s REAL NOT NULL
+                );
+            """)
+
+        migrated = DatabaseManager(db_path=legacy_db)
+        with migrated.get_connection() as conn:
+            columns = {row["name"] for row in conn.execute("PRAGMA table_info(trials)")}
+            foreign_keys = conn.execute("PRAGMA foreign_key_list(trials)").fetchall()
+
+        self.assertIn("experiment_id", columns)
+        self.assertTrue(any(row["table"] == "experiment" for row in foreign_keys))
+
+    def test_trial_rejects_unknown_experiment(self):
+        self.db.upsert_subject("B10")
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.insert_trial({
+                "experiment_id": 999,
+                "subject_id": "B10",
+                "trial_no": 1,
+                "video_id": "B10_T001_UNKNOWN_EXP",
+                "experiment_timestamp": "2026-08-30 12:00:00",
+                "video_file": "B10_T001_UNKNOWN_EXP.webm",
+                "stimulation_voltage_v": 2.0,
+                "stimulation_frequency_hz": 50.0,
+                "stimulation_duration_s": 0.5,
+            })
 
     def test_trial_rejects_unsafe_subject_id(self):
         config = TrialConfig(subject=Subject(subject_id="../escape"), trial_no=1)

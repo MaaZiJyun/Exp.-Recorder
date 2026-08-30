@@ -76,8 +76,10 @@ bool initCamera() {
   config.pin_reset = RESET_GPIO_NUM;
   config.xclk_freq_hz = 20000000;
   config.pixel_format = PIXFORMAT_JPEG;
-  config.frame_size = FRAMESIZE_VGA;
-  config.jpeg_quality = psramFound() ? 12 : 16;
+  // SVGA gives the live preview and recorded WebM more detail than VGA while
+  // keeping USB serial throughput and ESP32-S3 memory usage reasonable.
+  config.frame_size = FRAMESIZE_SVGA;
+  config.jpeg_quality = psramFound() ? 10 : 14;
   config.fb_count = psramFound() ? 2 : 1;
   config.grab_mode = CAMERA_GRAB_LATEST;
   config.fb_location = psramFound() ? CAMERA_FB_IN_PSRAM : CAMERA_FB_IN_DRAM;

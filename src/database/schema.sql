@@ -4,6 +4,13 @@ CREATE TABLE IF NOT EXISTS subjects (
     subject_id TEXT PRIMARY KEY,
     body_length_cm REAL,
     body_weight_g REAL,
+    body_width_cm REAL,
+    mandibular_length_cm REAL,
+    gender TEXT,
+    species TEXT,
+    time_since_last_feeding_h REAL,
+    time_since_last_experiment_h REAL,
+    recent_fighting TEXT,
     notes TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

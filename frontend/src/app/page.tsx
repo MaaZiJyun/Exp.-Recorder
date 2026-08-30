@@ -29,7 +29,7 @@ type DeviceStatus = {
 };
 
 type Trial = {
-  trial_id: number;
+  trial_id: number | null;
   experiment_id: number | null;
   experiment_title: string | null;
   subject_id: string;
@@ -54,6 +54,20 @@ type Experiment = {
   experiment_id: number;
   title: string;
   description: string | null;
+  created_at: string;
+  trial_count: number;
+};
+
+type SubjectRecord = {
+  subject_id: string;
+  body_length_cm: number | null;
+  body_weight_g: number | null;
+  body_width_cm: number | null;
+  mandibular_length_cm: number | null;
+  gender: string | null;
+  species: string | null;
+  time_since_last_experiment_h: number | null;
+  notes: string | null;
   created_at: string;
   trial_count: number;
 };
@@ -265,10 +279,31 @@ export default function Home() {
   );
   const [experimentSaving, setExperimentSaving] = useState(false);
   const [experimentDeleting, setExperimentDeleting] = useState(false);
+  const [manageTab, setManageTab] = useState<"experiments" | "subjects">(
+    "experiments",
+  );
+  const [subjects, setSubjects] = useState<SubjectRecord[]>([]);
+  const [subjectQuery, setSubjectQuery] = useState("");
+  const [editingSubject, setEditingSubject] = useState(false);
+  const [subjectEditorId, setSubjectEditorId] = useState<string | null>(null);
+  const [subjectSaving, setSubjectSaving] = useState(false);
+  const [subjectDeleting, setSubjectDeleting] = useState<string | null>(null);
+  const [subjectDraft, setSubjectDraft] = useState({
+    subject_id: "",
+    body_length_cm: "",
+    body_weight_g: "",
+    body_width_cm: "",
+    mandibular_length_cm: "",
+    gender: "",
+    species: "",
+    time_since_last_experiment_h: "",
+    notes: "",
+  });
   const [configurationOpen, setConfigurationOpen] = useState(false);
   const [form, setForm] = useState<TrialForm>(initialForm);
   const [filter, setFilter] = useState("");
   const [selected, setSelected] = useState<Trial | null>(null);
+  const [pendingTrial, setPendingTrial] = useState<Trial | null>(null);
   const [annotation, setAnnotation] = useState({
     latency: "",
     action: "",
@@ -314,6 +349,12 @@ export default function Home() {
     return records;
   }, []);
 
+  const loadSubjects = useCallback(async () => {
+    const records = await api<SubjectRecord[]>("/subjects");
+    setSubjects(records);
+    return records;
+  }, []);
+
   const refresh = useCallback(async () => {
     try {
       const [deviceState, taskState] = await Promise.all([
@@ -326,15 +367,20 @@ export default function Home() {
         previousTaskStatus.current === "RUNNING" &&
         taskState.status !== "RUNNING"
       ) {
+        if (taskState.status === "COMPLETED" && taskState.result) {
+          setPendingTrial(taskState.result);
+          setAnnotation({ latency: "", action: "", degree: "" });
+        }
         await Promise.all([
           loadTrials(filterRef.current, managedExperimentRef.current),
           loadExperiments(),
+          loadSubjects(),
         ]);
         setNotice({
           kind: taskState.status === "COMPLETED" ? "success" : "error",
           text:
             taskState.status === "COMPLETED"
-              ? "实验完成，数据已写入数据库。"
+              ? "实验完成，请填写 RESPONSE ANNOTATION 后保存或丢弃。"
               : (taskState.result?.error_message ?? "实验失败。"),
         });
       }
@@ -342,7 +388,7 @@ export default function Home() {
     } catch {
       setDevices(null);
     }
-  }, [loadExperiments, loadTrials]);
+  }, [loadExperiments, loadSubjects, loadTrials]);
 
   useEffect(() => {
     const initialLoad = window.setTimeout(() => {
@@ -363,6 +409,7 @@ export default function Home() {
           setExperiments([]);
           setTrials([]);
         });
+      void loadSubjects().catch(() => setSubjects([]));
       void refresh();
       void api<Record<string, string | number>>("/config")
         .then((defaults) => {
@@ -390,7 +437,7 @@ export default function Home() {
       window.clearInterval(timer);
       window.clearInterval(previewTimer);
     };
-  }, [loadExperiments, loadTrials, refresh]);
+  }, [loadExperiments, loadSubjects, loadTrials, refresh]);
 
   useEffect(() => {
     const logWindow = logWindowRef.current;
@@ -531,6 +578,109 @@ export default function Home() {
     }
   };
 
+  const newSubject = () => {
+    setSubjectEditorId(null);
+    setSubjectDraft({
+      subject_id: "",
+      body_length_cm: "",
+      body_weight_g: "",
+      body_width_cm: "",
+      mandibular_length_cm: "",
+      gender: "",
+      species: "",
+      time_since_last_experiment_h: "",
+      notes: "",
+    });
+    setEditingSubject(true);
+  };
+
+  const editSubject = (subject: SubjectRecord) => {
+    setSubjectEditorId(subject.subject_id);
+    setSubjectDraft({
+      subject_id: subject.subject_id,
+      body_length_cm: subject.body_length_cm?.toString() ?? "",
+      body_weight_g: subject.body_weight_g?.toString() ?? "",
+      body_width_cm: subject.body_width_cm?.toString() ?? "",
+      mandibular_length_cm: subject.mandibular_length_cm?.toString() ?? "",
+      gender: subject.gender ?? "",
+      species: subject.species ?? "",
+      time_since_last_experiment_h:
+        subject.time_since_last_experiment_h?.toString() ?? "",
+      notes: subject.notes ?? "",
+    });
+    setEditingSubject(true);
+  };
+
+  const saveSubject = async () => {
+    if (!subjectDraft.subject_id.trim()) {
+      setNotice({ kind: "error", text: "Subject ID 不能为空。" });
+      return;
+    }
+    setSubjectSaving(true);
+    try {
+      const record = await api<SubjectRecord>(
+        subjectEditorId === null
+          ? "/subjects"
+          : `/subjects/${encodeURIComponent(subjectEditorId)}`,
+        {
+          method: subjectEditorId === null ? "POST" : "PUT",
+          body: JSON.stringify({
+            subject_id: subjectDraft.subject_id.trim(),
+            body_length_cm: numberOrNull(subjectDraft.body_length_cm),
+            body_weight_g: numberOrNull(subjectDraft.body_weight_g),
+            body_width_cm: numberOrNull(subjectDraft.body_width_cm),
+            mandibular_length_cm: numberOrNull(
+              subjectDraft.mandibular_length_cm,
+            ),
+            gender: subjectDraft.gender.trim() || null,
+            species: subjectDraft.species.trim() || null,
+            time_since_last_experiment_h: numberOrNull(
+              subjectDraft.time_since_last_experiment_h,
+            ),
+            notes: subjectDraft.notes.trim() || null,
+          }),
+        },
+      );
+      await loadSubjects();
+      setEditingSubject(false);
+      if (form.subject_id === subjectEditorId)
+        setField("subject_id", record.subject_id);
+      setNotice({
+        kind: "success",
+        text: `Subject “${record.subject_id}” 已保存。`,
+      });
+    } catch (error) {
+      setNotice({
+        kind: "error",
+        text: error instanceof Error ? error.message : "保存失败",
+      });
+    } finally {
+      setSubjectSaving(false);
+    }
+  };
+
+  const deleteSubject = async (subject: SubjectRecord) => {
+    if (!window.confirm(`确定删除 Subject “${subject.subject_id}”？`)) return;
+    setSubjectDeleting(subject.subject_id);
+    try {
+      await api(`/subjects/${encodeURIComponent(subject.subject_id)}`, {
+        method: "DELETE",
+      });
+      await loadSubjects();
+      setNotice({
+        kind: "success",
+        text: `Subject “${subject.subject_id}” 已删除。`,
+      });
+    } catch (error) {
+      setNotice({
+        kind: "error",
+        text: error instanceof Error ? error.message : "删除失败",
+      });
+    } finally {
+      setSubjectDeleting(null);
+    }
+  };
+
   const startTrial = async () => {
     setNotice(null);
     if (!runExperimentId || !form.subject_id.trim()) {
@@ -541,6 +691,8 @@ export default function Home() {
       return;
     }
     try {
+      setPendingTrial(null);
+      setSelected(null);
       await api("/trials", {
         method: "POST",
         body: JSON.stringify({
@@ -571,15 +723,16 @@ export default function Home() {
     }
   };
 
-  const lookupSubject = async () => {
-    if (!form.subject_id.trim()) return;
+  const lookupSubject = async (subjectId = form.subject_id) => {
+    if (!subjectId.trim()) return;
     try {
       const subject = await api<{
         body_length_cm: number | null;
         body_weight_g: number | null;
-      }>(`/subjects/${encodeURIComponent(form.subject_id.trim())}`);
+      }>(`/subjects/${encodeURIComponent(subjectId.trim())}`);
       setForm((current) => ({
         ...current,
+        subject_id: subjectId,
         body_length_cm: subject.body_length_cm?.toString() ?? "",
         body_weight_g: subject.body_weight_g?.toString() ?? "",
       }));
@@ -644,8 +797,11 @@ export default function Home() {
           response_degree: numberOrNull(rowEdit.response_degree),
         }),
       });
-      await loadTrials(filterRef.current, managedExperimentRef.current);
-      await loadExperiments();
+      await Promise.all([
+        loadTrials(filterRef.current, managedExperimentRef.current),
+        loadExperiments(),
+        loadSubjects(),
+      ]);
       if (selected?.trial_id === editingId) setSelected(null);
       setEditingId(null);
       setRowEdit(null);
@@ -671,8 +827,11 @@ export default function Home() {
         setEditingId(null);
         setRowEdit(null);
       }
-      await loadTrials(filterRef.current, managedExperimentRef.current);
-      await loadExperiments();
+      await Promise.all([
+        loadTrials(filterRef.current, managedExperimentRef.current),
+        loadExperiments(),
+        loadSubjects(),
+      ]);
       setNotice({
         kind: "success",
         text: `Trial #${trial.trial_id} 已删除，录像文件已保留。`,
@@ -709,6 +868,48 @@ export default function Home() {
         kind: "error",
         text: error instanceof Error ? error.message : "保存失败",
       });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const savePendingTrial = async () => {
+    if (!pendingTrial) return;
+    setSaving(true);
+    try {
+      await api("/trials/current/commit", {
+        method: "POST",
+        body: JSON.stringify({
+          response_latency_s: numberOrNull(annotation.latency),
+          response_action: annotation.action.trim() || null,
+          response_degree: numberOrNull(annotation.degree),
+        }),
+      });
+      setPendingTrial(null);
+      setTask((current) => ({ ...current, status: "IDLE" }));
+      await Promise.all([
+        loadTrials(filterRef.current, managedExperimentRef.current),
+        loadExperiments(),
+        loadSubjects(),
+      ]);
+      setNotice({ kind: "success", text: "Trial 标注已保存到数据库。" });
+    } catch (error) {
+      setNotice({ kind: "error", text: error instanceof Error ? error.message : "保存失败" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const discardPendingTrial = async () => {
+    if (!pendingTrial || !window.confirm("丢弃本次 Trial？录像也会被删除。")) return;
+    setSaving(true);
+    try {
+      await api("/trials/current/discard", { method: "POST" });
+      setPendingTrial(null);
+      setTask((current) => ({ ...current, status: "IDLE", result: null }));
+      setNotice({ kind: "success", text: "本次 Trial 已丢弃。" });
+    } catch (error) {
+      setNotice({ kind: "error", text: error instanceof Error ? error.message : "丢弃失败" });
     } finally {
       setSaving(false);
     }
@@ -803,6 +1004,14 @@ export default function Home() {
           .includes(normalizedExperimentQuery),
       )
     : experiments;
+  const normalizedSubjectQuery = subjectQuery.trim().toLowerCase();
+  const visibleSubjects = normalizedSubjectQuery
+    ? subjects.filter((subject) =>
+        `${subject.subject_id} ${subject.notes ?? ""}`
+          .toLowerCase()
+          .includes(normalizedSubjectQuery),
+      )
+    : subjects;
   return (
     <AppShell
       workspace={view}
@@ -829,7 +1038,7 @@ export default function Home() {
         <section className="flex w-full flex-col gap-4 rounded-2xl border border-zinc-200 bg-zinc-50 p-4 xl:flex-row xl:items-end xl:justify-between xl:px-5">
           <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
             <div>
-              <p className="mb-1 text-xs font-medium uppercase tracking-wider text-zinc-500">
+              <p className="mb-1 text-sm font-medium uppercase">
                 Hardware status
               </p>
               <div className="flex py-3 gap-2">
@@ -872,14 +1081,24 @@ export default function Home() {
               </Select>
             </Field>
             <Field label="SUBJECT" className="min-w-40 flex-1 sm:flex-none">
-              <Input
+              <Select
                 value={form.subject_id}
-                onChange={(event) => setField("subject_id", event.target.value)}
-                onBlur={lookupSubject}
+                onChange={(event) => {
+                  const subjectId = event.target.value;
+                  setField("subject_id", subjectId);
+                  void lookupSubject(subjectId);
+                }}
                 disabled={running}
-                placeholder="Subject ID"
                 required
-              />
+              >
+                <option value="">Select a subject…</option>
+                {subjects.map((subject) => (
+                  <option key={subject.subject_id} value={subject.subject_id}>
+                    {subject.subject_id}
+                    {subject.species ? ` · ${subject.species}` : ""}
+                  </option>
+                ))}
+              </Select>
             </Field>
           </div>
           <div className="flex shrink-0 gap-2">
@@ -903,19 +1122,48 @@ export default function Home() {
         </section>
       ) : (
         <section className="flex w-full flex-col gap-3 sm:flex-row">
+          <div className="flex shrink-0 rounded-lg bg-zinc-100 p-1">
+            <button
+              type="button"
+              className={`rounded-md px-4 py-2 text-sm font-semibold ${manageTab === "experiments" ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-500"}`}
+              onClick={() => setManageTab("experiments")}
+            >
+              Experiments
+            </button>
+            <button
+              type="button"
+              className={`rounded-md px-4 py-2 text-sm font-semibold ${manageTab === "subjects" ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-500"}`}
+              onClick={() => setManageTab("subjects")}
+            >
+              Subjects
+            </button>
+          </div>
           <div className="relative min-w-0 flex-1">
             <MagnifyingGlassIcon className="pointer-events-none absolute left-3 top-1/2 size-5 -translate-y-1/2 text-zinc-400" />
             <Input
               type="search"
-              value={experimentQuery}
-              onChange={(event) => setExperimentQuery(event.target.value)}
-              placeholder="搜索 Experiment 标题、描述或 ID…"
+              value={
+                manageTab === "experiments" ? experimentQuery : subjectQuery
+              }
+              onChange={(event) =>
+                manageTab === "experiments"
+                  ? setExperimentQuery(event.target.value)
+                  : setSubjectQuery(event.target.value)
+              }
+              placeholder={
+                manageTab === "experiments"
+                  ? "搜索 Experiment 标题、描述或 ID…"
+                  : "搜索 Subject ID 或备注…"
+              }
               className="pl-10"
             />
           </div>
-          <Button onClick={newExperiment} className="shrink-0">
+          <Button
+            onClick={manageTab === "experiments" ? newExperiment : newSubject}
+            className="shrink-0"
+          >
             <PlusIcon className="size-4" />
-            新建 Experiment
+            {manageTab === "experiments" ? "新建 Experiment" : "新建 Subject"}
           </Button>
         </section>
       )}
@@ -986,6 +1234,151 @@ export default function Home() {
               disabled={experimentSaving}
             >
               {experimentSaving ? "保存中…" : "保存 Experiment"}
+            </Button>
+          </div>
+        </div>
+      </Dialog>
+
+      <Dialog
+        open={editingSubject}
+        title={subjectEditorId === null ? "New Subject" : "Edit Subject"}
+        closeLabel="关闭"
+        onClose={() => setEditingSubject(false)}
+      >
+        <div className="grid gap-5">
+          <Field label="SUBJECT ID">
+            <Input
+              value={subjectDraft.subject_id}
+              onChange={(event) =>
+                setSubjectDraft((current) => ({
+                  ...current,
+                  subject_id: event.target.value,
+                }))
+              }
+              placeholder="Subject ID"
+              autoFocus
+            />
+          </Field>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="BODY LENGTH (cm)">
+              <Input
+                type="number"
+                min="0"
+                step="any"
+                value={subjectDraft.body_length_cm}
+                onChange={(event) =>
+                  setSubjectDraft((current) => ({
+                    ...current,
+                    body_length_cm: event.target.value,
+                  }))
+                }
+              />
+            </Field>
+            <Field label="BODY WEIGHT (g)">
+              <Input
+                type="number"
+                min="0"
+                step="any"
+                value={subjectDraft.body_weight_g}
+                onChange={(event) =>
+                  setSubjectDraft((current) => ({
+                    ...current,
+                    body_weight_g: event.target.value,
+                  }))
+                }
+              />
+            </Field>
+            <Field label="BODY WIDTH (cm)">
+              <Input
+                type="number"
+                min="0"
+                step="any"
+                value={subjectDraft.body_width_cm}
+                onChange={(event) =>
+                  setSubjectDraft((current) => ({
+                    ...current,
+                    body_width_cm: event.target.value,
+                  }))
+                }
+              />
+            </Field>
+            <Field label="MANDIBULAR LENGTH (cm)">
+              <Input
+                type="number"
+                min="0"
+                step="any"
+                value={subjectDraft.mandibular_length_cm}
+                onChange={(event) =>
+                  setSubjectDraft((current) => ({
+                    ...current,
+                    mandibular_length_cm: event.target.value,
+                  }))
+                }
+              />
+            </Field>
+            <Field label="GENDER">
+              <Input
+                value={subjectDraft.gender}
+                onChange={(event) =>
+                  setSubjectDraft((current) => ({
+                    ...current,
+                    gender: event.target.value,
+                  }))
+                }
+                placeholder="e.g. Female"
+              />
+            </Field>
+            <Field label="SPECIES">
+              <Input
+                value={subjectDraft.species}
+                onChange={(event) =>
+                  setSubjectDraft((current) => ({
+                    ...current,
+                    species: event.target.value,
+                  }))
+                }
+                placeholder="Species"
+              />
+            </Field>
+            <Field
+              label="TIME SINCE LAST EXPERIMENT (h)"
+              className="sm:col-span-2"
+            >
+              <Input
+                type="number"
+                min="0"
+                step="any"
+                value={subjectDraft.time_since_last_experiment_h}
+                onChange={(event) =>
+                  setSubjectDraft((current) => ({
+                    ...current,
+                    time_since_last_experiment_h: event.target.value,
+                  }))
+                }
+              />
+            </Field>
+          </div>
+          <Field label="NOTES" hint="可选：记录样本批次、状态或其他说明。">
+            <Textarea
+              value={subjectDraft.notes}
+              onChange={(event) =>
+                setSubjectDraft((current) => ({
+                  ...current,
+                  notes: event.target.value,
+                }))
+              }
+              placeholder="Subject notes…"
+            />
+          </Field>
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => setEditingSubject(false)}
+            >
+              取消
+            </Button>
+            <Button onClick={() => void saveSubject()} disabled={subjectSaving}>
+              {subjectSaving ? "保存中…" : "保存 Subject"}
             </Button>
           </div>
         </div>
@@ -1128,7 +1521,7 @@ export default function Home() {
       </Dialog>
 
       <section
-        className={`dashboard-grid ${view === "execute" ? "execute-layout" : "manage-layout"}`}
+        className={`dashboard-grid ${view === "execute" ? "execute-layout" : "manage-layout"} ${view === "manage" && manageTab === "subjects" ? "subjects-layout" : ""}`}
       >
         <aside className="left-column">
           {view === "execute" ? (
@@ -1138,7 +1531,7 @@ export default function Home() {
                   <div className="section-heading">
                     <span>LIVE</span>
                     <h2>
-                      {selected
+                        {selected || pendingTrial
                         ? "Annotation video"
                         : running
                           ? "Recording monitor"
@@ -1146,19 +1539,23 @@ export default function Home() {
                     </h2>
                   </div>
                   <div
-                    className={`camera-mode ${selected ? "playback" : running ? "recording" : "idle"}`}
+                    className={`camera-mode ${selected || pendingTrial ? "playback" : running ? "recording" : "idle"}`}
                   >
                     <i />
-                    {selected ? "PLAYBACK" : running ? "REC" : "IDLE · LIVE"}
+                    {selected || pendingTrial ? "PLAYBACK" : running ? "REC" : "IDLE · LIVE"}
                   </div>
                 </div>
                 <div className="camera-viewport">
-                  {selected ? (
+                  {selected || pendingTrial ? (
                     <video
-                      key={selected.trial_id}
+                      key={selected?.trial_id ?? pendingTrial?.video_id}
                       controls
                       preload="metadata"
-                      src={`/backend/trials/${selected.trial_id}/video`}
+                      src={
+                        selected?.trial_id
+                          ? `/backend/trials/${selected.trial_id}/video`
+                          : "/backend/pending-trial/video"
+                      }
                     />
                   ) : devices?.camera_connected && !devices.mock ? (
                     <img
@@ -1190,7 +1587,7 @@ export default function Home() {
                 )}
               </section>
             </>
-          ) : (
+          ) : manageTab === "experiments" ? (
             <>
               <section className="panel experiment-index-panel">
                 <div className="experiment-index-heading">
@@ -1287,7 +1684,7 @@ export default function Home() {
                 )}
               </section>
             </>
-          )}
+          ) : null}
         </aside>
 
         <section className="right-column">
@@ -1299,6 +1696,7 @@ export default function Home() {
                 disabled={
                   !ready ||
                   running ||
+                  Boolean(pendingTrial) ||
                   !runExperimentId ||
                   !form.subject_id.trim()
                 }
@@ -1356,12 +1754,51 @@ export default function Home() {
                   )}
                 </div>
               </section>
+              {pendingTrial && (
+                <section className="panel annotation-drawer open">
+                  <div className="annotation-title">
+                    <div>
+                      <p>RESPONSE ANNOTATION</p>
+                      <h3>
+                        {pendingTrial.subject_id} · Trial {pendingTrial.trial_no}
+                      </h3>
+                    </div>
+                  </div>
+                  <p className="pending-hint">
+                    Trial 尚未写入数据库。完成标记后点击保存，或丢弃本次录像。
+                  </p>
+                  <div className="annotation-fields">
+                    <label className="field">
+                      <span>LATENCY <em>s</em></span>
+                      <input type="number" min="0" step="any" value={annotation.latency} onChange={(e) => setAnnotation({ ...annotation, latency: e.target.value })} />
+                    </label>
+                    <label className="field action-field">
+                      <span>ACTION CODE</span>
+                      <select value={annotation.action} onChange={(e) => setAnnotation({ ...annotation, action: e.target.value })}>
+                        <option value="">Not tagged</option>
+                        {responseActions.map((action) => <option key={action.code} value={action.code}>{action.code} · {action.zh} / {action.en}</option>)}
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span>DEGREE</span>
+                      <select value={annotation.degree} onChange={(e) => setAnnotation({ ...annotation, degree: e.target.value })}>
+                        <option value="">Not tagged</option>
+                        {responseDegrees.map((degree) => <option key={degree.score} value={degree.score}>{degree.score} · {degree.level}</option>)}
+                      </select>
+                    </label>
+                    <div className="pending-actions">
+                      <Button onClick={() => void savePendingTrial()} disabled={saving}>保存并写入</Button>
+                      <Button variant="danger" onClick={() => void discardPendingTrial()} disabled={saving}>Discard</Button>
+                    </div>
+                  </div>
+                </section>
+              )}
             </>
-          ) : (
+          ) : manageTab === "experiments" ? (
             <>
-              <section className="panel history-panel">
-                <div className="history-header">
-                  <div className="section-heading">
+              <section className="panel history-panel trials-history-panel">
+                <div className="history-header items-center justify-between">
+                  <div>
                     <h2>
                       {managedExperiment
                         ? `${managedExperiment.title} / Trials`
@@ -1369,53 +1806,6 @@ export default function Home() {
                     </h2>
                   </div>
                   <div className="history-tools">
-                    <Button
-                      className="min-h-9 px-3 text-xs"
-                      disabled={!managedExperiment}
-                      onClick={() => {
-                        if (managedExperiment)
-                          setRunExperimentId(
-                            String(managedExperiment.experiment_id),
-                          );
-                        setSelected(null);
-                        setView("execute");
-                      }}
-                    >
-                      <PlusIcon className="size-4" />
-                      新建 Trial
-                    </Button>
-                    <div className="flex">
-                      <Input
-                        className="min-h-9 w-36 rounded-r-none text-xs"
-                        placeholder="筛选 Subject…"
-                        value={filter}
-                        disabled={!managedExperiment}
-                        onChange={(e) => {
-                          filterRef.current = e.target.value;
-                          setFilter(e.target.value);
-                        }}
-                        onKeyDown={(e) =>
-                          e.key === "Enter" &&
-                          void loadTrials(
-                            filterRef.current,
-                            managedExperimentRef.current,
-                          )
-                        }
-                      />
-                      <Button
-                        variant="secondary"
-                        className="min-h-9 rounded-l-none px-3 text-xs"
-                        disabled={!managedExperiment}
-                        onClick={() =>
-                          void loadTrials(
-                            filterRef.current,
-                            managedExperimentRef.current,
-                          )
-                        }
-                      >
-                        筛选
-                      </Button>
-                    </div>
                     <Button
                       variant="secondary"
                       className="min-h-9 px-3 text-xs"
@@ -1931,6 +2321,123 @@ export default function Home() {
                 </div>
               </section>
             </>
+          ) : (
+            <section className="panel history-panel subject-records-panel">
+              <div className="history-header">
+                <div className="section-heading">
+                  <h2>Subject Records</h2>
+                </div>
+                <Button className="min-h-9 px-3 text-xs" onClick={newSubject}>
+                  <PlusIcon className="size-4" />
+                  新建 Subject
+                </Button>
+              </div>
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>SUBJECT ID</th>
+                      <th>LENGTH</th>
+                      <th>WIDTH</th>
+                      <th>MANDIBLE</th>
+                      <th>WEIGHT</th>
+                      <th>GENDER</th>
+                      <th>SPECIES</th>
+                      <th>SINCE LAST</th>
+                      <th>NOTES</th>
+                      <th>TRIALS</th>
+                      <th>CREATED</th>
+                      <th>ACTIONS</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visibleSubjects.map((subject) => (
+                      <tr key={subject.subject_id}>
+                        <td>
+                          <strong>{subject.subject_id}</strong>
+                        </td>
+                        <td>
+                          {subject.body_length_cm ?? "—"}
+                          <small>
+                            {subject.body_length_cm !== null ? "cm" : ""}
+                          </small>
+                        </td>
+                        <td>
+                          {subject.body_width_cm ?? "—"}
+                          <small>
+                            {subject.body_width_cm !== null ? "cm" : ""}
+                          </small>
+                        </td>
+                        <td>
+                          {subject.mandibular_length_cm ?? "—"}
+                          <small>
+                            {subject.mandibular_length_cm !== null ? "cm" : ""}
+                          </small>
+                        </td>
+                        <td>
+                          {subject.body_weight_g ?? "—"}
+                          <small>
+                            {subject.body_weight_g !== null ? "g" : ""}
+                          </small>
+                        </td>
+                        <td>{subject.gender || "—"}</td>
+                        <td>{subject.species || "—"}</td>
+                        <td>
+                          {subject.time_since_last_experiment_h ?? "—"}
+                          <small>
+                            {subject.time_since_last_experiment_h !== null
+                              ? "h"
+                              : ""}
+                          </small>
+                        </td>
+                        <td className="subject-notes">
+                          {subject.notes || (
+                            <span className="muted">No notes</span>
+                          )}
+                        </td>
+                        <td>{subject.trial_count}</td>
+                        <td>{subject.created_at?.slice(0, 16) ?? "—"}</td>
+                        <td>
+                          <div className="row-actions">
+                            <button
+                              onClick={() => editSubject(subject)}
+                              disabled={running}
+                            >
+                              编辑
+                            </button>
+                            <button
+                              className="row-delete"
+                              onClick={() => void deleteSubject(subject)}
+                              disabled={
+                                running ||
+                                subject.trial_count > 0 ||
+                                subjectDeleting === subject.subject_id
+                              }
+                            >
+                              {subjectDeleting === subject.subject_id
+                                ? "…"
+                                : "删除"}
+                            </button>
+                          </div>
+                          {subject.trial_count > 0 && (
+                            <small>先删除关联 Trial</small>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                    {visibleSubjects.length === 0 && (
+                      <tr>
+                        <td className="empty-table" colSpan={12}>
+                          {subjects.length === 0
+                            ? "还没有 Subject。"
+                            : "没有匹配的 Subject。"}
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </section>
           )}
         </section>
       </section>

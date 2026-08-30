@@ -60,6 +60,20 @@ class ExperimentRequest(BaseModel):
     description: Optional[str] = Field(default=None, max_length=2000)
 
 
+class SubjectRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    subject_id: str = Field(min_length=1, max_length=120)
+    body_length_cm: Optional[float] = Field(default=None, ge=0)
+    body_weight_g: Optional[float] = Field(default=None, ge=0)
+    body_width_cm: Optional[float] = Field(default=None, ge=0)
+    mandibular_length_cm: Optional[float] = Field(default=None, ge=0)
+    gender: Optional[str] = Field(default=None, max_length=80)
+    species: Optional[str] = Field(default=None, max_length=200)
+    time_since_last_experiment_h: Optional[float] = Field(default=None, ge=0)
+    notes: Optional[str] = Field(default=None, max_length=2000)
+
+
 class TrialUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -97,6 +111,7 @@ class ExperimentController:
             camera_driver=self.camera,
             db_manager=self.db,
             status_callback=self._append_log,
+            persist_results=False,
         )
 
     def _append_log(self, message: str) -> None:
@@ -136,6 +151,8 @@ class ExperimentController:
         with self._lock:
             if self._task_status == "RUNNING":
                 raise RuntimeError("已有实验正在运行。")
+            if self._task_status == "COMPLETED" and self._task_result and self._task_result.get("trial_id") is None:
+                raise RuntimeError("请先保存或丢弃上一个待标注 Trial。")
             if not self.sdg.is_connected or not self.camera.is_connected:
                 raise RuntimeError("硬件未就绪，请先连接两个设备。")
             if (
@@ -143,9 +160,12 @@ class ExperimentController:
                 and self.db.get_experiment(request.experiment_id) is None
             ):
                 raise ValueError(f"Experiment ID {request.experiment_id} 不存在。")
+            subject_id = request.subject_id.strip()
+            if self.db.get_subject(subject_id) is None:
+                raise ValueError(f"Subject {subject_id} 不存在，请先在 Manage > Subjects 中创建。")
 
             subject = Subject(
-                subject_id=request.subject_id.strip(),
+                subject_id=subject_id,
                 body_length_cm=request.body_length_cm,
                 body_weight_g=request.body_weight_g,
             )
@@ -196,6 +216,39 @@ class ExperimentController:
                 "result": self._task_result,
                 "logs": list(self._logs),
             }
+
+    def commit_pending_trial(self, annotation: AnnotationRequest) -> int:
+        with self._lock:
+            if self._task_status != "COMPLETED" or not self._task_result:
+                raise RuntimeError("当前没有等待标注的 Trial。")
+            result = dict(self._task_result)
+            result["response_latency_s"] = annotation.response_latency_s
+            result["response_action"] = annotation.response_action
+            result["response_degree"] = annotation.response_degree
+            trial_id = self.db.insert_trial(result)
+            result["trial_id"] = trial_id
+            self._task_result = result
+            self._task_status = "IDLE"
+            self._append_log(f"Trial recorded to database (Trial ID: {trial_id}).")
+            return trial_id
+
+    def discard_pending_trial(self) -> None:
+        with self._lock:
+            if self._task_status != "COMPLETED" or not self._task_result:
+                raise RuntimeError("当前没有等待标注的 Trial。")
+            video_file = self._task_result.get("video_file")
+            if video_file:
+                path = Path(video_file)
+                if not path.is_absolute():
+                    path = cfg.VIDEO_DIR / path.name
+                try:
+                    if path.resolve().parent == cfg.VIDEO_DIR.resolve() and path.is_file():
+                        path.unlink()
+                except OSError:
+                    logger.warning("Unable to remove discarded video %s", path)
+            self._task_result = None
+            self._task_status = "IDLE"
+            self._append_log("Pending Trial discarded.")
 
     def clear_data(self) -> dict[str, int]:
         with self._lock:
@@ -278,12 +331,70 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
         except RuntimeError as exc:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
+    @app.get("/api/subjects")
+    def subjects() -> list[dict[str, Any]]:
+        return controller.db.list_subjects()
+
+    @app.post("/api/subjects", status_code=status.HTTP_201_CREATED)
+    def create_subject(request: SubjectRequest) -> dict[str, Any]:
+        if controller.db.get_subject(request.subject_id) is not None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Subject ID already exists")
+        controller.db.upsert_subject(
+            request.subject_id,
+            request.body_length_cm,
+            request.body_weight_g,
+            request.notes or None,
+            request.body_width_cm,
+            request.mandibular_length_cm,
+            request.gender or None,
+            request.species or None,
+            request.time_since_last_experiment_h,
+        )
+        return controller.db.get_subject(request.subject_id) or {}
+
     @app.get("/api/subjects/{subject_id}")
     def subject(subject_id: str) -> dict[str, Any]:
         record = controller.db.get_subject(subject_id)
         if record is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subject not found")
         return record
+
+    @app.put("/api/subjects/{subject_id}")
+    def update_subject(subject_id: str, request: SubjectRequest) -> dict[str, Any]:
+        if controller.current_task()["status"] == "RUNNING":
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="实验运行中，不能编辑 Subject。")
+        try:
+            updated = controller.db.update_subject(
+                subject_id,
+                request.subject_id,
+                request.body_length_cm,
+                request.body_weight_g,
+                request.notes or None,
+                request.body_width_cm,
+                request.mandibular_length_cm,
+                request.gender or None,
+                request.species or None,
+                request.time_since_last_experiment_h,
+            )
+        except Exception as exc:
+            if "UNIQUE constraint failed" in str(exc):
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Subject ID already exists") from exc
+            raise
+        if not updated:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subject not found")
+        return controller.db.get_subject(request.subject_id) or {}
+
+    @app.delete("/api/subjects/{subject_id}")
+    def delete_subject(subject_id: str) -> dict[str, bool]:
+        if controller.current_task()["status"] == "RUNNING":
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="实验运行中，不能删除 Subject。")
+        record = controller.db.get_subject(subject_id)
+        if record is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subject not found")
+        if record["trial_count"]:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="请先删除该 Subject 的所有 Trial。")
+        controller.db.delete_subject(subject_id)
+        return {"deleted": True}
 
     @app.get("/api/experiments")
     def experiments() -> list[dict[str, Any]]:
@@ -353,6 +464,17 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
         media_type = "video/webm" if video_path.suffix.lower() == ".webm" else "video/x-msvideo"
         return FileResponse(video_path, media_type=media_type, filename=video_path.name)
 
+    @app.get("/api/pending-trial/video")
+    def pending_trial_video() -> FileResponse:
+        current = controller.current_task()
+        if current["status"] != "COMPLETED" or not current["result"]:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No pending Trial")
+        stored_path = Path(current["result"].get("video_file", ""))
+        video_path = (stored_path if stored_path.is_absolute() else cfg.VIDEO_DIR / stored_path.name).resolve()
+        if video_path.parent != cfg.VIDEO_DIR.resolve() or not video_path.is_file():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video file not found")
+        return FileResponse(video_path, media_type="video/webm", filename=video_path.name)
+
     @app.get("/api/trials/export")
     def export_trials(
         subject_id: Optional[str] = None,
@@ -364,7 +486,9 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
             limit=100_000,
         )
         columns = [
-            "trial_id", "experiment_id", "subject_id", "body_length_cm", "body_weight_g", "trial_no",
+            "trial_id", "experiment_id", "subject_id", "body_length_cm",
+            "body_weight_g", "body_width_cm", "mandibular_length_cm",
+            "gender", "species", "time_since_last_experiment_h", "trial_no",
             "video_id", "experiment_timestamp", "video_file", "stimulation_time",
             "stimulation_position", "stimulation_waveform", "stimulation_high_level_v",
             "stimulation_low_level_v", "stimulation_duty_cycle_pct",
@@ -394,6 +518,22 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
     @app.get("/api/trials/current")
     def current_trial() -> dict[str, Any]:
         return controller.current_task()
+
+    @app.post("/api/trials/current/commit")
+    def commit_pending_trial(request: AnnotationRequest) -> dict[str, Any]:
+        try:
+            trial_id = controller.commit_pending_trial(request)
+            return {"trial_id": trial_id}
+        except RuntimeError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+    @app.post("/api/trials/current/discard")
+    def discard_pending_trial() -> dict[str, bool]:
+        try:
+            controller.discard_pending_trial()
+            return {"discarded": True}
+        except RuntimeError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
     @app.patch("/api/trials/{trial_id}/annotation")
     def annotate_trial(trial_id: int, request: AnnotationRequest) -> dict[str, bool]:

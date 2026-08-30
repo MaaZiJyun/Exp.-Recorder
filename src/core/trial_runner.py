@@ -21,11 +21,13 @@ class TrialRunner:
         sdg_driver: SDG1022XDriver,
         camera_driver: XiaoCameraDriver,
         db_manager: DatabaseManager,
-        status_callback: Optional[Callable[[str], None]] = None
+        status_callback: Optional[Callable[[str], None]] = None,
+        persist_results: bool = True,
     ):
         self.sdg = sdg_driver
         self.camera = camera_driver
         self.db = db_manager
+        self.persist_results = persist_results
         self.status_callback = status_callback
 
     def _notify_status(self, message: str) -> None:
@@ -46,7 +48,7 @@ class TrialRunner:
         6. Stimulus Mark & Trigger SDG1022X
         7. Post-stimulus delay
         8. Stop XIAO Camera Recording & verify SAVED
-        9. Save Trial Record to SQLite
+        9. Return the completed result for annotation before persistence
         """
         config.validate()
         now = datetime.now()
@@ -154,16 +156,11 @@ class TrialRunner:
                 except Exception:
                     pass
 
-        finally:
-            # 9. Save Trial Record to SQLite
+        if self.persist_results:
             try:
-                trial_id = self.db.insert_trial(result.to_dict())
-                result.trial_id = trial_id
-                self._notify_status(f"Trial recorded to database (Trial ID: {trial_id}).")
+                result.trial_id = self.db.insert_trial(result.to_dict())
             except Exception as e:
-                logger.error(f"Failed to record trial in SQLite: {e}")
+                logger.error("Failed to record trial in SQLite: %s", e)
                 result.status = "FAILED"
-                if not result.error_message:
-                    result.error_message = f"Database save failed: {e}"
-
+                result.error_message = result.error_message or f"Database save failed: {e}"
         return result

@@ -40,6 +40,21 @@ class DatabaseManager:
             for column, definition in migrations.items():
                 if column not in existing_columns:
                     conn.execute(f"ALTER TABLE trials ADD COLUMN {column} {definition}")
+            existing_subject_columns = {
+                row["name"] for row in conn.execute("PRAGMA table_info(subjects)").fetchall()
+            }
+            subject_migrations = {
+                "body_width_cm": "REAL",
+                "mandibular_length_cm": "REAL",
+                "gender": "TEXT",
+                "species": "TEXT",
+                "time_since_last_feeding_h": "REAL",
+                "time_since_last_experiment_h": "REAL",
+                "recent_fighting": "TEXT",
+            }
+            for column, definition in subject_migrations.items():
+                if column not in existing_subject_columns:
+                    conn.execute(f"ALTER TABLE subjects ADD COLUMN {column} {definition}")
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_trials_experiment ON trials(experiment_id)"
             )
@@ -102,26 +117,125 @@ class DatabaseManager:
         subject_id: str,
         body_length_cm: Optional[float] = None,
         body_weight_g: Optional[float] = None,
-        notes: Optional[str] = None
+        notes: Optional[str] = None,
+        body_width_cm: Optional[float] = None,
+        mandibular_length_cm: Optional[float] = None,
+        gender: Optional[str] = None,
+        species: Optional[str] = None,
+        time_since_last_experiment_h: Optional[float] = None,
     ) -> None:
         query = """
-        INSERT INTO subjects (subject_id, body_length_cm, body_weight_g, notes)
-        VALUES (?, ?, ?, ?)
+        INSERT INTO subjects (
+            subject_id, body_length_cm, body_weight_g, notes, body_width_cm,
+            mandibular_length_cm, gender, species, time_since_last_experiment_h
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(subject_id) DO UPDATE SET
             body_length_cm = COALESCE(excluded.body_length_cm, subjects.body_length_cm),
             body_weight_g = COALESCE(excluded.body_weight_g, subjects.body_weight_g),
-            notes = COALESCE(excluded.notes, subjects.notes)
+            notes = COALESCE(excluded.notes, subjects.notes),
+            body_width_cm = COALESCE(excluded.body_width_cm, subjects.body_width_cm),
+            mandibular_length_cm = COALESCE(excluded.mandibular_length_cm, subjects.mandibular_length_cm),
+            gender = COALESCE(excluded.gender, subjects.gender),
+            species = COALESCE(excluded.species, subjects.species),
+            time_since_last_experiment_h = COALESCE(excluded.time_since_last_experiment_h, subjects.time_since_last_experiment_h)
         """
         with self.get_connection() as conn:
-            conn.execute(query, (subject_id, body_length_cm, body_weight_g, notes))
+            conn.execute(query, (
+                subject_id, body_length_cm, body_weight_g, notes, body_width_cm,
+                mandibular_length_cm, gender, species, time_since_last_experiment_h,
+            ))
             conn.commit()
 
     def get_subject(self, subject_id: str) -> Optional[Dict[str, Any]]:
-        query = "SELECT * FROM subjects WHERE subject_id = ?"
+        query = """
+        SELECT s.*, COUNT(t.trial_id) AS trial_count
+        FROM subjects s
+        LEFT JOIN trials t ON t.subject_id = s.subject_id
+        WHERE s.subject_id = ?
+        GROUP BY s.subject_id
+        """
         with self.get_connection() as conn:
             cursor = conn.execute(query, (subject_id,))
             row = cursor.fetchone()
             return dict(row) if row else None
+
+    def list_subjects(self) -> List[Dict[str, Any]]:
+        query = """
+        SELECT s.*, COUNT(t.trial_id) AS trial_count
+        FROM subjects s
+        LEFT JOIN trials t ON t.subject_id = s.subject_id
+        GROUP BY s.subject_id
+        ORDER BY s.created_at DESC, s.subject_id
+        """
+        with self.get_connection() as conn:
+            return [dict(row) for row in conn.execute(query).fetchall()]
+
+    def update_subject(
+        self,
+        current_subject_id: str,
+        subject_id: str,
+        body_length_cm: Optional[float] = None,
+        body_weight_g: Optional[float] = None,
+        notes: Optional[str] = None,
+        body_width_cm: Optional[float] = None,
+        mandibular_length_cm: Optional[float] = None,
+        gender: Optional[str] = None,
+        species: Optional[str] = None,
+        time_since_last_experiment_h: Optional[float] = None,
+    ) -> bool:
+        """Update a subject, safely carrying linked trials across an ID rename."""
+        with self.get_connection() as conn:
+            existing = conn.execute(
+                "SELECT 1 FROM subjects WHERE subject_id = ?",
+                (current_subject_id,),
+            ).fetchone()
+            if not existing:
+                return False
+            if subject_id == current_subject_id:
+                conn.execute(
+                    """UPDATE subjects
+                    SET body_length_cm = ?, body_weight_g = ?, notes = ?,
+                        body_width_cm = ?, mandibular_length_cm = ?, gender = ?,
+                        species = ?, time_since_last_experiment_h = ?
+                    WHERE subject_id = ?""",
+                    (
+                        body_length_cm, body_weight_g, notes, body_width_cm,
+                        mandibular_length_cm, gender, species,
+                        time_since_last_experiment_h, current_subject_id,
+                    ),
+                )
+            else:
+                conn.execute(
+                    """INSERT INTO subjects
+                    (subject_id, body_length_cm, body_weight_g, notes, body_width_cm,
+                     mandibular_length_cm, gender, species, time_since_last_experiment_h)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        subject_id, body_length_cm, body_weight_g, notes,
+                        body_width_cm, mandibular_length_cm, gender, species,
+                        time_since_last_experiment_h,
+                    ),
+                )
+                conn.execute(
+                    "UPDATE trials SET subject_id = ? WHERE subject_id = ?",
+                    (subject_id, current_subject_id),
+                )
+                conn.execute(
+                    "DELETE FROM subjects WHERE subject_id = ?",
+                    (current_subject_id,),
+                )
+            conn.commit()
+            return True
+
+    def delete_subject(self, subject_id: str) -> bool:
+        """Delete an unreferenced subject; linked trials remain FK-protected."""
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                "DELETE FROM subjects WHERE subject_id = ?",
+                (subject_id,),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
 
     def get_next_trial_no(
         self,
@@ -228,7 +342,9 @@ class DatabaseManager:
 
         where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
         query = f"""
-        SELECT t.*, s.body_length_cm, s.body_weight_g, e.title AS experiment_title
+        SELECT t.*, s.body_length_cm, s.body_weight_g, s.body_width_cm,
+               s.mandibular_length_cm, s.gender, s.species,
+               s.time_since_last_experiment_h, e.title AS experiment_title
         FROM trials t
         LEFT JOIN subjects s ON t.subject_id = s.subject_id
         LEFT JOIN experiment e ON t.experiment_id = e.experiment_id

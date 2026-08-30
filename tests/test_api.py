@@ -99,5 +99,34 @@ class TestExperimentController(unittest.TestCase):
         self.assertEqual(self.controller.db.list_trials(), [])
         self.assertIsNotNone(self.controller.db.get_subject("EDIT01"))
 
+    def test_subject_crud_and_rename(self):
+        self.controller.db.upsert_subject(
+            "S01", 4.2, 1.1, "first batch",
+            body_width_cm=1.8,
+            mandibular_length_cm=0.7,
+            gender="Female",
+            species="Test species",
+            time_since_last_experiment_h=24,
+        )
+        subjects = self.controller.db.list_subjects()
+        self.assertEqual(len(subjects), 1)
+        self.assertEqual(subjects[0]["trial_count"], 0)
+        self.assertEqual(subjects[0]["body_width_cm"], 1.8)
+        self.assertEqual(subjects[0]["mandibular_length_cm"], 0.7)
+        self.assertEqual(subjects[0]["gender"], "Female")
+        self.assertEqual(subjects[0]["species"], "Test species")
+        self.assertEqual(subjects[0]["time_since_last_experiment_h"], 24)
+
+        self.assertTrue(
+            self.controller.db.update_subject("S01", "S02", 4.5, 1.2, "updated")
+        )
+        self.assertIsNone(self.controller.db.get_subject("S01"))
+        renamed = self.controller.db.get_subject("S02")
+        self.assertEqual(renamed["body_length_cm"], 4.5)
+        self.assertEqual(renamed["notes"], "updated")
+
+        self.assertTrue(self.controller.db.delete_subject("S02"))
+        self.assertEqual(self.controller.db.list_subjects(), [])
+
 if __name__ == "__main__":
     unittest.main()

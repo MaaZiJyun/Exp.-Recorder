@@ -792,9 +792,6 @@ export default function Home() {
     setForm((current) => ({ ...current, [key]: value }));
   const ready = Boolean(devices?.sdg_connected && devices?.camera_connected);
   const running = task.status === "RUNNING";
-  const selectedRunExperiment = experiments.find(
-    (item) => String(item.experiment_id) === runExperimentId,
-  );
   const managedExperiment =
     experiments.find((item) => item.experiment_id === managedExperimentId) ??
     null;
@@ -829,31 +826,61 @@ export default function Home() {
       }
     >
       {view === "execute" ? (
-        <section className="flex w-full flex-col gap-4 rounded-2xl border border-zinc-200 bg-zinc-50 p-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+        <section className="flex w-full flex-col gap-4 rounded-2xl border border-zinc-200 bg-zinc-50 p-4 xl:flex-row xl:items-end xl:justify-between xl:px-5">
+          <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
             <div>
-              <p className="text-xs font-medium uppercase tracking-wider text-zinc-500">
+              <p className="mb-1 text-xs font-medium uppercase tracking-wider text-zinc-500">
                 Hardware status
               </p>
-              <p className="mt-1 text-sm font-semibold">
-                {ready ? "All devices ready" : "Waiting for hardware"}
-              </p>
+              <div className="flex py-3 gap-2">
+                <div className="flex items-center gap-2 text-sm">
+                  <StatusDot active={Boolean(devices?.sdg_connected)} />
+                  <span>SDG1022X</span>
+                  <Badge tone={devices?.sdg_connected ? "success" : "neutral"}>
+                    {devices?.sdg_connected ? "ONLINE" : "OFFLINE"}
+                  </Badge>
+                </div>
+                <div className="flex items-center gap-2 text-sm">
+                  <StatusDot active={Boolean(devices?.camera_connected)} />
+                  <span>XIAO ESP32S3</span>
+                  <Badge
+                    tone={devices?.camera_connected ? "success" : "neutral"}
+                  >
+                    {devices?.camera_connected ? "ONLINE" : "OFFLINE"}
+                  </Badge>
+                </div>
+              </div>
             </div>
-            <div className="flex items-center gap-2 text-sm">
-              <StatusDot active={Boolean(devices?.sdg_connected)} />
-              <span>SDG1022X</span>
-              <Badge tone={devices?.sdg_connected ? "success" : "neutral"}>
-                {devices?.sdg_connected ? "ONLINE" : "OFFLINE"}
-              </Badge>
-            </div>
-            <div className="flex items-center gap-2 text-sm">
-              <StatusDot active={Boolean(devices?.camera_connected)} />
-              <span>XIAO ESP32S3</span>
-              <Badge tone={devices?.camera_connected ? "success" : "neutral"}>
-                {devices?.camera_connected ? "ONLINE" : "OFFLINE"}
-              </Badge>
-            </div>
+
             {devices?.mock && <Badge tone="warning">SIMULATION MODE</Badge>}
+            <Field label="EXPERIMENT" className="min-w-56 flex-1 sm:flex-none">
+              <Select
+                value={runExperimentId}
+                onChange={(event) => setRunExperimentId(event.target.value)}
+                disabled={running}
+                required
+              >
+                <option value="">Select an experiment…</option>
+                {experiments.map((experiment) => (
+                  <option
+                    key={experiment.experiment_id}
+                    value={experiment.experiment_id}
+                  >
+                    {experiment.title}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="SUBJECT" className="min-w-40 flex-1 sm:flex-none">
+              <Input
+                value={form.subject_id}
+                onChange={(event) => setField("subject_id", event.target.value)}
+                onBlur={lookupSubject}
+                disabled={running}
+                placeholder="Subject ID"
+                required
+              />
+            </Field>
           </div>
           <div className="flex shrink-0 gap-2">
             <Button
@@ -1162,8 +1189,6 @@ export default function Home() {
                   </button>
                 )}
               </section>
-
-              
             </>
           ) : (
             <>
@@ -1331,221 +1356,6 @@ export default function Home() {
                   )}
                 </div>
               </section>
-              <form
-                className="panel config-panel trial-identity-panel"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  void startTrial();
-                }}
-              >
-                {selectedRunExperiment && (
-                  <div className="selected-experiment-note">
-                    <strong>{selectedRunExperiment.title}</strong>
-                    <span>
-                      {selectedRunExperiment.description || "No description"}
-                    </span>
-                  </div>
-                )}
-                <div className="flex gap-3">
-                  <label className="field experiment-select">
-                    <span>EXPERIMENT</span>
-                    <select
-                      value={runExperimentId}
-                      onChange={(e) => setRunExperimentId(e.target.value)}
-                      required
-                    >
-                      <option value="">Select an experiment…</option>
-                      {experiments.map((experiment) => (
-                        <option
-                          key={experiment.experiment_id}
-                          value={experiment.experiment_id}
-                        >
-                          {experiment.title}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="field wide">
-                    <span>SUBJECT ID</span>
-                    <input
-                      value={form.subject_id}
-                      onChange={(e) => setField("subject_id", e.target.value)}
-                      onBlur={lookupSubject}
-                      required
-                    />
-                  </label>
-                </div>
-                <div className="divider parameter-fields">
-                  <span>STIMULUS</span>
-                </div>
-                <div className="form-grid parameter-fields">
-                  <label className="field">
-                    <span>WAVEFORM</span>
-                    <select
-                      value={form.waveform}
-                      onChange={(e) => setField("waveform", e.target.value)}
-                    >
-                      <option value="SQUARE">Square</option>
-                      <option value="PULSE">Pulse</option>
-                      <option value="SINE">Sine</option>
-                      <option value="RAMP">Ramp</option>
-                    </select>
-                  </label>
-                  <label className="field">
-                    <span>
-                      FREQUENCY <em>Hz</em>
-                    </span>
-                    <input
-                      type="number"
-                      step="any"
-                      min="0.001"
-                      value={form.frequency_hz}
-                      onChange={(e) => setField("frequency_hz", e.target.value)}
-                      required
-                    />
-                  </label>
-                  <label className="field">
-                    <span>
-                      HIGH LEVEL <em>V</em>
-                    </span>
-                    <input
-                      type="number"
-                      step="any"
-                      value={form.high_level_v}
-                      onChange={(e) => setField("high_level_v", e.target.value)}
-                      required
-                    />
-                  </label>
-                  <label className="field">
-                    <span>
-                      LOW LEVEL <em>V</em>
-                    </span>
-                    <input
-                      type="number"
-                      step="any"
-                      value={form.low_level_v}
-                      onChange={(e) => setField("low_level_v", e.target.value)}
-                      required
-                    />
-                  </label>
-                  <label className="field">
-                    <span>
-                      DUTY CYCLE <em>%</em>
-                    </span>
-                    <input
-                      type="number"
-                      step="any"
-                      min="0.1"
-                      max="99.9"
-                      value={form.duty_cycle_pct}
-                      onChange={(e) =>
-                        setField("duty_cycle_pct", e.target.value)
-                      }
-                      required
-                    />
-                  </label>
-                  <label className="field">
-                    <span>
-                      DURATION <em>s</em>
-                    </span>
-                    <input
-                      type="number"
-                      step="any"
-                      min="0.001"
-                      value={form.duration_s}
-                      onChange={(e) => setField("duration_s", e.target.value)}
-                      required
-                    />
-                  </label>
-                  <label className="field">
-                    <span>COUNT</span>
-                    <input
-                      type="number"
-                      step="1"
-                      min="1"
-                      value={form.count}
-                      onChange={(e) => setField("count", e.target.value)}
-                      required
-                    />
-                  </label>
-                  <label className="field">
-                    <span>
-                      INTERVAL <em>s</em>
-                    </span>
-                    <input
-                      type="number"
-                      step="any"
-                      min="0"
-                      value={form.interval_s}
-                      onChange={(e) => setField("interval_s", e.target.value)}
-                      required
-                    />
-                  </label>
-                  <label className="field">
-                    <span>POSITION</span>
-                    <input
-                      value={form.position}
-                      onChange={(e) => setField("position", e.target.value)}
-                      required
-                    />
-                  </label>
-                </div>
-                <div className="divider parameter-fields">
-                  <span>RECORDING WINDOW</span>
-                </div>
-                <div className="parameter-fields flex items-center justify-between gap-4">
-                  <div className="timing-row">
-                    <label className="field">
-                      <span>
-                        BASELINE <em>s</em>
-                      </span>
-                      <input
-                        type="number"
-                        step="any"
-                        min="0"
-                        value={form.baseline_duration_s}
-                        onChange={(e) =>
-                          setField("baseline_duration_s", e.target.value)
-                        }
-                        required
-                      />
-                    </label>
-                    <div className="timeline">
-                      <i />
-                      <b>STIM</b>
-                      <i />
-                    </div>
-                    <label className="field">
-                      <span>
-                        POST-STIM <em>s</em>
-                      </span>
-                      <input
-                        type="number"
-                        step="any"
-                        min="0"
-                        value={form.post_stim_duration_s}
-                        onChange={(e) =>
-                          setField("post_stim_duration_s", e.target.value)
-                        }
-                        required
-                      />
-                    </label>
-                  </div>
-                  <button
-                    className="start-button"
-                    disabled={!ready || running || !runExperimentId}
-                  >
-                    <span>{running ? "●" : "▶"}</span>
-                    {running ? "TRIAL IN PROGRESS" : "START TRIAL"}
-                  </button>
-                </div>
-
-                {ready && !runExperimentId && (
-                  <p className="button-hint">
-                    Select an experiment before starting.
-                  </p>
-                )}
-              </form>
             </>
           ) : (
             <>

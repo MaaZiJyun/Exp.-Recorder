@@ -105,7 +105,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .camera-heading { display: flex; align-items: flex-start; justify-content: space-between; }
 .camera-heading .section-heading { margin-bottom: 10px; }
 .camera-heading .section-heading h2 { font-size: 14px; }
-.camera-mode { display: flex; align-items: center; gap: 7px; padding: 6px 8px; border: 1px solid var(--line); font: 700 9px/1 "SF Mono", monospace; letter-spacing: .6px; }
+.camera-mode { display: flex; align-items: center; gap: 7px; padding: 6px 8px; font: 700 9px/1 "SF Mono", monospace; letter-spacing: .6px; }
 .camera-mode i { width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
 .camera-mode.recording { color: #a93f36; border-color: #e1b6ae; background: #fff8f6; }
 .camera-mode.recording i { background: var(--coral); animation: camera-pulse 1s ease-in-out infinite; }
@@ -130,7 +130,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .progress-track span.complete { width: 100%; }
 .progress-track span.moving { width: 38%; animation: progress 1.8s ease-in-out infinite; }
 @keyframes progress { 0% { transform: translateX(-110%); } 100% { transform: translateX(300%); } }
-.log-window { flex: 1; min-height: 126px; height: auto; overflow-x: hidden; overflow-y: auto; padding-right: 8px; overscroll-behavior: contain; scrollbar-color: #6b7d74 #2d3a35; scrollbar-width: thin; font: 10px/1.7 "SF Mono", monospace; }
+.log-window { flex: none; min-height: 210px; height: 280px; overflow-x: hidden; overflow-y: auto; padding-right: 8px; overscroll-behavior: contain; scrollbar-color: #6b7d74 #2d3a35; scrollbar-width: thin; font: 10px/1.7 "SF Mono", monospace; }
 .log-window::-webkit-scrollbar { width: 7px; }
 .log-window::-webkit-scrollbar-track { background: #2d3a35; }
 .log-window::-webkit-scrollbar-thumb { background: #6b7d74; border-radius: 8px; }
@@ -269,6 +269,7 @@ footer { max-width: 1600px; margin: 0 auto; padding-top: 14px; display: flex; ju
   .history-tools { width: 100%; flex-wrap: wrap; }
   .annotation-fields { grid-template-columns: 1fr; }
   .management-video { grid-template-columns: 1fr; }
+  .log-window { min-height: 150px; height: 150px; }
   .execute-layout > .left-column { grid-column: auto; grid-row: auto; }
   .execute-layout > .right-column { display: contents; }
   .execute-layout > .right-column > :not(.annotation-drawer),

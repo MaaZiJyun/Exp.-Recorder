@@ -322,10 +322,31 @@ export default function Home() {
     text: string;
   } | null>(null);
   const [previewTick, setPreviewTick] = useState(0);
+  const [cameraMirrored, setCameraMirrored] = useState(false);
+  const [cameraFlipped, setCameraFlipped] = useState(false);
   const previousTaskStatus = useRef(task.status);
   const filterRef = useRef("");
   const managedExperimentRef = useRef<number | null>(null);
   const logWindowRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const saved = window.localStorage.getItem("exp-recorder-camera-transform");
+    if (!saved) return;
+    try {
+      const value = JSON.parse(saved) as { mirrored?: boolean; rotated?: boolean };
+      setCameraMirrored(Boolean(value.mirrored));
+      setCameraFlipped(Boolean(value.rotated));
+    } catch {
+      // Ignore an invalid local preference.
+    }
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      "exp-recorder-camera-transform",
+      JSON.stringify({ mirrored: cameraMirrored, rotated: cameraFlipped }),
+    );
+  }, [cameraMirrored, cameraFlipped]);
 
   const loadTrials = useCallback(
     async (subject = "", experimentId: number | null = null) => {
@@ -437,7 +458,7 @@ export default function Home() {
     const timer = window.setInterval(() => void refresh(), 900);
     const previewTimer = window.setInterval(
       () => setPreviewTick((value) => value + 1),
-      250,
+      160,
     );
     return () => {
       window.clearTimeout(initialLoad);
@@ -1631,11 +1652,32 @@ export default function Home() {
                         ? "REC"
                         : "IDLE · LIVE"}
                   </div>
+                  <div className="camera-tools">
+                    <button
+                      type="button"
+                      className={cameraMirrored ? "active" : ""}
+                      onClick={() => setCameraMirrored((value) => !value)}
+                      title="水平镜像"
+                    >
+                      镜像
+                    </button>
+                    <button
+                      type="button"
+                      className={cameraFlipped ? "active" : ""}
+                      onClick={() => setCameraFlipped((value) => !value)}
+                      title="顺时针旋转 90 度"
+                    >
+                      旋转90°
+                    </button>
+                  </div>
                 </div>
                 <div className="camera-viewport">
                   {selected || pendingTrial ? (
                     <video
                       key={selected?.trial_id ?? pendingTrial?.video_id}
+                      style={{
+                        transform: `${cameraMirrored ? "scaleX(-1) " : ""}${cameraFlipped ? "rotate(90deg)" : ""}`.trim() || "none",
+                      }}
                       controls
                       preload="metadata"
                       src={
@@ -1648,6 +1690,9 @@ export default function Home() {
                     <img
                       src={`/backend/camera/frame?t=${previewTick}`}
                       alt={running ? "实验录像实时画面" : "摄像机空闲实时预览"}
+                      style={{
+                        transform: `${cameraMirrored ? "scaleX(-1) " : ""}${cameraFlipped ? "rotate(90deg)" : ""}`.trim() || "none",
+                      }}
                     />
                   ) : (
                     <div className="camera-empty">

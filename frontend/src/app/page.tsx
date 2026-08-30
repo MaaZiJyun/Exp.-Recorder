@@ -364,6 +364,13 @@ export default function Home() {
       setDevices(deviceState);
       setTask(taskState);
       if (
+        taskState.status === "COMPLETED" &&
+        taskState.result &&
+        taskState.result.trial_id === null
+      ) {
+        setPendingTrial((current) => current ?? taskState.result);
+      }
+      if (
         previousTaskStatus.current === "RUNNING" &&
         taskState.status !== "RUNNING"
       ) {
@@ -894,14 +901,18 @@ export default function Home() {
       ]);
       setNotice({ kind: "success", text: "Trial 标注已保存到数据库。" });
     } catch (error) {
-      setNotice({ kind: "error", text: error instanceof Error ? error.message : "保存失败" });
+      setNotice({
+        kind: "error",
+        text: error instanceof Error ? error.message : "保存失败",
+      });
     } finally {
       setSaving(false);
     }
   };
 
   const discardPendingTrial = async () => {
-    if (!pendingTrial || !window.confirm("丢弃本次 Trial？录像也会被删除。")) return;
+    if (!pendingTrial || !window.confirm("丢弃本次 Trial？录像也会被删除。"))
+      return;
     setSaving(true);
     try {
       await api("/trials/current/discard", { method: "POST" });
@@ -909,7 +920,10 @@ export default function Home() {
       setTask((current) => ({ ...current, status: "IDLE", result: null }));
       setNotice({ kind: "success", text: "本次 Trial 已丢弃。" });
     } catch (error) {
-      setNotice({ kind: "error", text: error instanceof Error ? error.message : "丢弃失败" });
+      setNotice({
+        kind: "error",
+        text: error instanceof Error ? error.message : "丢弃失败",
+      });
     } finally {
       setSaving(false);
     }
@@ -1526,12 +1540,81 @@ export default function Home() {
         <aside className="left-column">
           {view === "execute" ? (
             <>
+              {pendingTrial && (
+                <div className="">
+                  <div className="annotation-title">
+                    <div>
+                      <h3>
+                        {pendingTrial.subject_id} · Trial{" "}
+                        {pendingTrial.trial_no}
+                      </h3>
+                    </div>
+                  </div>
+                  <div className="annotation-fields">
+                    <label className="field">
+                      <span>
+                        LATENCY <em>s</em>
+                      </span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="any"
+                        value={annotation.latency}
+                        onChange={(e) =>
+                          setAnnotation({
+                            ...annotation,
+                            latency: e.target.value,
+                          })
+                        }
+                      />
+                    </label>
+                    <label className="field action-field">
+                      <span>ACTION CODE</span>
+                      <select
+                        value={annotation.action}
+                        onChange={(e) =>
+                          setAnnotation({
+                            ...annotation,
+                            action: e.target.value,
+                          })
+                        }
+                      >
+                        <option value="">Not tagged</option>
+                        {responseActions.map((action) => (
+                          <option key={action.code} value={action.code}>
+                            {action.code} · {action.zh} / {action.en}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span>DEGREE</span>
+                      <select
+                        value={annotation.degree}
+                        onChange={(e) =>
+                          setAnnotation({
+                            ...annotation,
+                            degree: e.target.value,
+                          })
+                        }
+                      >
+                        <option value="">Not tagged</option>
+                        {responseDegrees.map((degree) => (
+                          <option key={degree.score} value={degree.score}>
+                            {degree.score} · {degree.level}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                </div>
+              )}
               <section className="panel camera-panel">
                 <div className="camera-heading">
                   <div className="section-heading">
                     <span>LIVE</span>
                     <h2>
-                        {selected || pendingTrial
+                      {selected || pendingTrial
                         ? "Annotation video"
                         : running
                           ? "Recording monitor"
@@ -1542,7 +1625,11 @@ export default function Home() {
                     className={`camera-mode ${selected || pendingTrial ? "playback" : running ? "recording" : "idle"}`}
                   >
                     <i />
-                    {selected || pendingTrial ? "PLAYBACK" : running ? "REC" : "IDLE · LIVE"}
+                    {selected || pendingTrial
+                      ? "PLAYBACK"
+                      : running
+                        ? "REC"
+                        : "IDLE · LIVE"}
                   </div>
                 </div>
                 <div className="camera-viewport">
@@ -1690,109 +1777,89 @@ export default function Home() {
         <section className="right-column">
           {view === "execute" ? (
             <>
-              <Button
-                className="w-full min-h-12"
-                onClick={() => void startTrial()}
-                disabled={
-                  !ready ||
-                  running ||
-                  Boolean(pendingTrial) ||
-                  !runExperimentId ||
-                  !form.subject_id.trim()
-                }
-              >
-                <span>{running ? "●" : "▶"}</span>
-                {running ? "TRIAL IN PROGRESS" : "START TRIAL"}
-              </Button>
-              <section className="panel run-panel">
-                <div className="run-summary">
-                  <div>
-                    <p>CURRENT RUN</p>
-                    <h2>
-                      {running
-                        ? `Trial ${task.result?.trial_no ?? "in progress"}`
-                        : task.status === "IDLE"
-                          ? "Standing by"
-                          : task.status}
-                    </h2>
+              <div className="execute-controls">
+                {pendingTrial ? (
+                  <div className="pending-top-actions">
+                    <Button
+                      onClick={() => void savePendingTrial()}
+                      disabled={saving}
+                    >
+                      Confirm
+                    </Button>
+                    <Button
+                      variant="danger"
+                      onClick={() => void discardPendingTrial()}
+                      disabled={saving}
+                    >
+                      Discard
+                    </Button>
                   </div>
-                  <div className={`run-badge ${task.status.toLowerCase()}`}>
-                    {task.status}
-                  </div>
-                </div>
-                <div className="progress-track">
-                  <span
-                    className={
-                      running
-                        ? "moving"
-                        : task.status === "COMPLETED"
-                          ? "complete"
-                          : ""
+                ) : (
+                  <Button
+                    className="w-full min-h-12"
+                    onClick={() => void startTrial()}
+                    disabled={
+                      !ready ||
+                      running ||
+                      !runExperimentId ||
+                      !form.subject_id.trim()
                     }
-                  />
-                </div>
-                <div
-                  className="log-window"
-                  ref={logWindowRef}
-                  role="log"
-                  aria-live="polite"
-                >
-                  {task.logs.length === 0 ? (
-                    <p className="empty-log">
-                      System messages will appear here.
-                    </p>
-                  ) : (
-                    task.logs.map((log, index) => (
-                      <div
-                        className="log-line"
-                        key={`${log.timestamp}-${index}`}
-                      >
-                        <time>{log.timestamp.slice(11, 19)}</time>
-                        <span>{log.message}</span>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </section>
-              {pendingTrial && (
-                <section className="panel annotation-drawer open">
-                  <div className="annotation-title">
+                  >
+                    <span>{running ? "●" : "▶"}</span>
+                    {running ? "TRIAL IN PROGRESS" : "START TRIAL"}
+                  </Button>
+                )}
+                <section className="panel run-panel">
+                  <div className="run-summary">
                     <div>
-                      <p>RESPONSE ANNOTATION</p>
-                      <h3>
-                        {pendingTrial.subject_id} · Trial {pendingTrial.trial_no}
-                      </h3>
+                      <p>CURRENT RUN</p>
+                      <h2>
+                        {running
+                          ? `Trial ${task.result?.trial_no ?? "in progress"}`
+                          : task.status === "IDLE"
+                            ? "Standing by"
+                            : task.status}
+                      </h2>
+                    </div>
+                    <div className={`run-badge ${task.status.toLowerCase()}`}>
+                      {task.status}
                     </div>
                   </div>
-                  <p className="pending-hint">
-                    Trial 尚未写入数据库。完成标记后点击保存，或丢弃本次录像。
-                  </p>
-                  <div className="annotation-fields">
-                    <label className="field">
-                      <span>LATENCY <em>s</em></span>
-                      <input type="number" min="0" step="any" value={annotation.latency} onChange={(e) => setAnnotation({ ...annotation, latency: e.target.value })} />
-                    </label>
-                    <label className="field action-field">
-                      <span>ACTION CODE</span>
-                      <select value={annotation.action} onChange={(e) => setAnnotation({ ...annotation, action: e.target.value })}>
-                        <option value="">Not tagged</option>
-                        {responseActions.map((action) => <option key={action.code} value={action.code}>{action.code} · {action.zh} / {action.en}</option>)}
-                      </select>
-                    </label>
-                    <label className="field">
-                      <span>DEGREE</span>
-                      <select value={annotation.degree} onChange={(e) => setAnnotation({ ...annotation, degree: e.target.value })}>
-                        <option value="">Not tagged</option>
-                        {responseDegrees.map((degree) => <option key={degree.score} value={degree.score}>{degree.score} · {degree.level}</option>)}
-                      </select>
-                    </label>
-                    <div className="pending-actions">
-                      <Button onClick={() => void savePendingTrial()} disabled={saving}>保存并写入</Button>
-                      <Button variant="danger" onClick={() => void discardPendingTrial()} disabled={saving}>Discard</Button>
-                    </div>
+                  <div className="progress-track">
+                    <span
+                      className={
+                        running
+                          ? "moving"
+                          : task.status === "COMPLETED"
+                            ? "complete"
+                            : ""
+                      }
+                    />
+                  </div>
+                  <div
+                    className="log-window"
+                    ref={logWindowRef}
+                    role="log"
+                    aria-live="polite"
+                  >
+                    {task.logs.length === 0 ? (
+                      <p className="empty-log">
+                        System messages will appear here.
+                      </p>
+                    ) : (
+                      task.logs.map((log, index) => (
+                        <div
+                          className="log-line"
+                          key={`${log.timestamp}-${index}`}
+                        >
+                          <time>{log.timestamp.slice(11, 19)}</time>
+                          <span>{log.message}</span>
+                        </div>
+                      ))
+                    )}
                   </div>
                 </section>
-              )}
+              </div>
             </>
           ) : manageTab === "experiments" ? (
             <>

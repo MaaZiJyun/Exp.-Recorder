@@ -44,6 +44,13 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .left-column, .right-column { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
 .execute-layout { grid-template-columns: minmax(0, 1fr) 360px; align-items: start; }
 .execute-layout > .left-column, .execute-layout > .right-column { display: flex; }
+.execute-layout > .left-column { grid-column: 1; grid-row: 1; align-self: stretch; }
+.execute-layout > .left-column .camera-panel { height: 100%; }
+.execute-layout > .right-column { display: contents; }
+.execute-layout > .right-column > .execute-controls { grid-column: 2; display: flex; flex-direction: column; gap: 18px; height: 100%; }
+.execute-controls .run-panel { flex: 1; min-height: 0; }
+.pending-top-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; min-height: 48px; }
+.execute-layout > .right-column > .annotation-drawer { grid-column: 1 / -1; width: 100%; }
 .subjects-layout { grid-template-columns: minmax(0, 1fr); }
 .subjects-layout > .left-column { display: none; }
 .execute-layout .config-panel { order: -1; padding: 22px; }
@@ -93,7 +100,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .start-button span { margin-right: 10px; color: var(--coral); }
 .button-hint { margin: 8px 0 0; text-align: center; color: var(--muted); font-size: 10px; }
 
-.run-panel { min-height: 200px; color: #fafafa; background: var(--ink); border-color: var(--ink); }
+.run-panel { min-height: 200px; display: flex; flex-direction: column; color: #fafafa; background: var(--ink); border-color: var(--ink); }
 .camera-panel { padding: 14px; }
 .camera-heading { display: flex; align-items: flex-start; justify-content: space-between; }
 .camera-heading .section-heading { margin-bottom: 10px; }
@@ -123,7 +130,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .progress-track span.complete { width: 100%; }
 .progress-track span.moving { width: 38%; animation: progress 1.8s ease-in-out infinite; }
 @keyframes progress { 0% { transform: translateX(-110%); } 100% { transform: translateX(300%); } }
-.log-window { height: 126px; overflow-x: hidden; overflow-y: auto; padding-right: 8px; overscroll-behavior: contain; scrollbar-color: #6b7d74 #2d3a35; scrollbar-width: thin; font: 10px/1.7 "SF Mono", monospace; }
+.log-window { flex: 1; min-height: 126px; height: auto; overflow-x: hidden; overflow-y: auto; padding-right: 8px; overscroll-behavior: contain; scrollbar-color: #6b7d74 #2d3a35; scrollbar-width: thin; font: 10px/1.7 "SF Mono", monospace; }
 .log-window::-webkit-scrollbar { width: 7px; }
 .log-window::-webkit-scrollbar-track { background: #2d3a35; }
 .log-window::-webkit-scrollbar-thumb { background: #6b7d74; border-radius: 8px; }
@@ -204,7 +211,7 @@ td small { margin-top: 4px; color: var(--muted); font-size: 11px; }
 .annotation-title { display: flex; justify-content: space-between; align-items: center; margin-bottom: 13px; }
 .annotation-title h3 { margin: 0; font: 600 15px/1.2 Georgia, serif; }
 .annotation-title button { border: 0; background: transparent; font-size: 22px; }
-.annotation-fields { display: grid; grid-template-columns: 110px minmax(180px, 1fr) 100px 75px; align-items: end; gap: 10px; }
+.annotation-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: end; gap: 10px; }
 .save-button { height: 37px; border: 0; color: #fff; background: var(--green); font: 750 9px/1 "SF Mono", monospace; }
 .response-guide { margin-top: 15px; border-top: 1px solid var(--soft-line); }
 .response-guide summary { padding: 13px 0 2px; cursor: pointer; color: var(--green); font: 700 10px/1.4 "SF Mono", monospace; }
@@ -233,6 +240,10 @@ footer { max-width: 1600px; margin: 0 auto; padding-top: 14px; display: flex; ju
   .system-pill { margin-left: auto; }
   .dashboard-grid { grid-template-columns: 1fr; }
   .execute-layout { grid-template-columns: 1fr; }
+  .execute-layout > .left-column { grid-column: auto; grid-row: auto; }
+  .execute-layout > .right-column { display: contents; }
+  .execute-layout > .right-column > .execute-controls,
+  .execute-layout > .right-column > .annotation-drawer { grid-column: auto; }
   .execute-layout .subject-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .execute-layout .subject-grid .wide { grid-column: 1 / -1; }
   .left-column, .right-column { display: contents; }
@@ -258,6 +269,10 @@ footer { max-width: 1600px; margin: 0 auto; padding-top: 14px; display: flex; ju
   .history-tools { width: 100%; flex-wrap: wrap; }
   .annotation-fields { grid-template-columns: 1fr; }
   .management-video { grid-template-columns: 1fr; }
+  .execute-layout > .left-column { grid-column: auto; grid-row: auto; }
+  .execute-layout > .right-column { display: contents; }
+  .execute-layout > .right-column > :not(.annotation-drawer),
+  .execute-layout > .right-column > .annotation-drawer { grid-column: auto; }
   .save-button { grid-column: auto; }
   footer { gap: 15px; line-height: 1.5; }
 }

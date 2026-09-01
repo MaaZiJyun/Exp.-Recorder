@@ -8,7 +8,9 @@ import csv
 from datetime import datetime
 import io
 from pathlib import Path
+import re
 import threading
+from concurrent.futures import ThreadPoolExecutor
 import uuid
 from typing import Any, Optional
 
@@ -40,7 +42,8 @@ class TrialRequest(BaseModel):
     duration_s: float = cfg.DEFAULT_DURATION_S
     count: int = cfg.DEFAULT_COUNT
     interval_s: float = cfg.DEFAULT_INTERVAL_S
-    position: str = cfg.DEFAULT_STIM_POSITION
+    position_id: int = Field(ge=1)
+    position_2_id: int = Field(ge=1)
     baseline_duration_s: float = cfg.DEFAULT_BASELINE_DURATION_S
     post_stim_duration_s: float = cfg.DEFAULT_POST_STIM_DURATION_S
 
@@ -74,6 +77,55 @@ class SubjectRequest(BaseModel):
     notes: Optional[str] = Field(default=None, max_length=2000)
 
 
+class PositionMark(BaseModel):
+    x: float = Field(ge=0, le=1)
+    y: float = Field(ge=0, le=1)
+
+
+class StimulationPositionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    code: str = Field(min_length=1, max_length=40, pattern=r"^[A-Za-z0-9_-]+$")
+    description: Optional[str] = Field(default=None, max_length=2000)
+    image: Optional[str] = Field(default=None, max_length=3_000_000)
+    mark: Optional[PositionMark] = None
+
+
+_POSITION_IMAGE_PATTERN = re.compile(
+    r"^data:image/(?:png|jpeg|webp|gif);base64,[A-Za-z0-9+/=\r\n]+$"
+)
+
+
+def _validate_position_image(image: Optional[str]) -> Optional[str]:
+    if not image:
+        return None
+    if not _POSITION_IMAGE_PATTERN.fullmatch(image):
+        raise ValueError("Position image 必须是 PNG、JPEG、WebP 或 GIF 图片。")
+    return image
+
+
+def _position_mark(request: StimulationPositionRequest) -> Optional[dict[str, float]]:
+    if request.mark is not None and not request.image:
+        raise ValueError("设置 mark 前必须先选择图片。")
+    return request.mark.model_dump() if request.mark is not None else None
+
+
+def _validate_position_pair(
+    position: dict[str, Any], position_2: dict[str, Any]
+) -> None:
+    if position["position_id"] == position_2["position_id"]:
+        raise ValueError("两个 Stimulation Position 必须不同。")
+    if (
+        position.get("image_id") is None
+        or position_2.get("image_id") is None
+        or position.get("mark") is None
+        or position_2.get("mark") is None
+    ):
+        raise ValueError("两个 Stimulation Position 都必须设置图片和 mark。")
+    if position["image_id"] != position_2["image_id"]:
+        raise ValueError("两个 Stimulation Position 必须使用同一张图片。")
+
+
 class TrialUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -81,7 +133,8 @@ class TrialUpdateRequest(BaseModel):
     subject_id: str = Field(min_length=1, max_length=120)
     trial_no: int = Field(ge=1)
     experiment_timestamp: str = Field(min_length=1, max_length=40)
-    stimulation_position: str = Field(max_length=120)
+    stimulation_position_id: int = Field(ge=1)
+    stimulation_position_2_id: int = Field(ge=1)
     stimulation_waveform: str = Field(min_length=1, max_length=40)
     stimulation_high_level_v: float
     stimulation_low_level_v: float
@@ -127,6 +180,7 @@ class ExperimentController:
         return {
             "mock": self.mock,
             "sdg_connected": self.sdg.is_connected,
+            "sdg_error": self.sdg.last_error,
             "camera_connected": self.camera.is_connected,
             "camera_recording": self.camera.is_recording,
             "camera_error": self.camera.last_error,
@@ -139,8 +193,13 @@ class ExperimentController:
         self._append_log("正在重新连接硬件…")
         self.sdg.disconnect()
         self.camera.disconnect()
-        sdg_ok = self.sdg.connect()
-        camera_ok = self.camera.connect()
+        # The devices are independent. Connecting concurrently prevents a VISA
+        # timeout from delaying camera detection (and vice versa).
+        with ThreadPoolExecutor(max_workers=2, thread_name_prefix="hardware-connect") as pool:
+            sdg_future = pool.submit(self.sdg.connect)
+            camera_future = pool.submit(self.camera.connect)
+            sdg_ok = sdg_future.result()
+            camera_ok = camera_future.result()
         self._append_log(
             f"硬件连接完成：SDG1022X={'成功' if sdg_ok else '失败'}，"
             f"XIAO={'成功' if camera_ok else '失败'}。"
@@ -163,6 +222,11 @@ class ExperimentController:
             subject_id = request.subject_id.strip()
             if self.db.get_subject(subject_id) is None:
                 raise ValueError(f"Subject {subject_id} 不存在，请先在 Manage > Subjects 中创建。")
+            position = self.db.get_stimulation_position(request.position_id)
+            position_2 = self.db.get_stimulation_position(request.position_2_id)
+            if position is None or position_2 is None:
+                raise ValueError("请选择数据库中已标记的 Stimulation Position。")
+            _validate_position_pair(position, position_2)
 
             subject = Subject(
                 subject_id=subject_id,
@@ -186,7 +250,9 @@ class ExperimentController:
                     duration_s=request.duration_s,
                     count=request.count,
                     interval_s=request.interval_s,
-                    position=request.position.strip(),
+                    position=f"{position['code']}{position_2['code']}",
+                    position_id=position["position_id"],
+                    position_2_id=position_2["position_id"],
                 ),
                 timing=TimingConfig(
                     baseline_duration_s=request.baseline_duration_s,
@@ -305,7 +371,6 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
             "duration_s": cfg.DEFAULT_DURATION_S,
             "count": cfg.DEFAULT_COUNT,
             "interval_s": cfg.DEFAULT_INTERVAL_S,
-            "position": cfg.DEFAULT_STIM_POSITION,
             "baseline_duration_s": cfg.DEFAULT_BASELINE_DURATION_S,
             "post_stim_duration_s": cfg.DEFAULT_POST_STIM_DURATION_S,
         }
@@ -394,6 +459,63 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
         if record["trial_count"]:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="请先删除该 Subject 的所有 Trial。")
         controller.db.delete_subject(subject_id)
+        return {"deleted": True}
+
+    @app.get("/api/stimulation-positions")
+    def stimulation_positions() -> list[dict[str, Any]]:
+        return controller.db.list_stimulation_positions()
+
+    @app.post("/api/stimulation-positions", status_code=status.HTTP_201_CREATED)
+    def create_stimulation_position(request: StimulationPositionRequest) -> dict[str, Any]:
+        try:
+            position_id = controller.db.create_stimulation_position(
+                request.code.upper(),
+                request.description or None,
+                _validate_position_image(request.image),
+                _position_mark(request),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
+        except Exception as exc:
+            if "UNIQUE constraint failed" in str(exc):
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Position code already exists") from exc
+            raise
+        return controller.db.get_stimulation_position(position_id) or {}
+
+    @app.put("/api/stimulation-positions/{position_id}")
+    def update_stimulation_position(
+        position_id: int, request: StimulationPositionRequest
+    ) -> dict[str, Any]:
+        if controller.current_task()["status"] == "RUNNING":
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="实验运行中，不能编辑 Position。")
+        try:
+            updated = controller.db.update_stimulation_position(
+                position_id,
+                request.code.upper(),
+                request.description or None,
+                _validate_position_image(request.image),
+                _position_mark(request),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
+        except Exception as exc:
+            if "UNIQUE constraint failed" in str(exc):
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Position code already exists") from exc
+            raise
+        if not updated:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Position not found")
+        return controller.db.get_stimulation_position(position_id) or {}
+
+    @app.delete("/api/stimulation-positions/{position_id}")
+    def delete_stimulation_position(position_id: int) -> dict[str, bool]:
+        if controller.current_task()["status"] == "RUNNING":
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="实验运行中，不能删除 Position。")
+        record = controller.db.get_stimulation_position(position_id)
+        if record is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Position not found")
+        if record["trial_count"]:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="该 Position 已被 Trial 使用，不能删除。")
+        controller.db.delete_stimulation_position(position_id)
         return {"deleted": True}
 
     @app.get("/api/experiments")
@@ -490,7 +612,8 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
             "body_weight_g", "body_width_cm", "mandibular_length_cm",
             "gender", "species", "time_since_last_experiment_h", "trial_no",
             "video_id", "experiment_timestamp", "video_file", "stimulation_time",
-            "stimulation_position", "stimulation_waveform", "stimulation_high_level_v",
+            "stimulation_position_id", "stimulation_position_2_id", "stimulation_position",
+            "stimulation_waveform", "stimulation_high_level_v",
             "stimulation_low_level_v", "stimulation_duty_cycle_pct",
             "stimulation_voltage_v", "stimulation_frequency_hz", "stimulation_duration_s",
             "stimulation_count", "stimulation_interval_s", "baseline_duration_s",
@@ -553,8 +676,23 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="实验运行中，不能编辑记录。")
         subject_id = request.subject_id.strip()
         controller.db.upsert_subject(subject_id)
+        position = controller.db.get_stimulation_position(request.stimulation_position_id)
+        position_2 = controller.db.get_stimulation_position(request.stimulation_position_2_id)
+        if position is None or position_2 is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="请选择数据库中已标记的 Stimulation Position。",
+            )
+        try:
+            _validate_position_pair(position, position_2)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=str(exc),
+            ) from exc
         values = request.model_dump(exclude_unset=True)
         values["subject_id"] = subject_id
+        values["stimulation_position"] = f"{position['code']}{position_2['code']}"
         values["stimulation_voltage_v"] = request.stimulation_high_level_v - request.stimulation_low_level_v
         updated = controller.db.update_trial(trial_id, values)
         if not updated:

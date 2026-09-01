@@ -1,5 +1,7 @@
 """Database Manager for SQLite."""
 
+import hashlib
+import json
 import sqlite3
 from pathlib import Path
 from typing import Optional, List, Dict, Any
@@ -32,6 +34,8 @@ class DatabaseManager:
             }
             migrations = {
                 "experiment_id": "INTEGER REFERENCES experiment(experiment_id)",
+                "stimulation_position_id": "INTEGER REFERENCES stimulation_positions(position_id)",
+                "stimulation_position_2_id": "INTEGER REFERENCES stimulation_positions(position_id)",
                 "stimulation_waveform": "TEXT NOT NULL DEFAULT 'SQUARE'",
                 "stimulation_high_level_v": "REAL",
                 "stimulation_low_level_v": "REAL",
@@ -55,10 +59,168 @@ class DatabaseManager:
             for column, definition in subject_migrations.items():
                 if column not in existing_subject_columns:
                     conn.execute(f"ALTER TABLE subjects ADD COLUMN {column} {definition}")
+            existing_position_columns = {
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(stimulation_positions)").fetchall()
+            }
+            position_migrations = {
+                "image_id": "INTEGER REFERENCES stimulation_position_images(image_id)",
+                "mark": "TEXT",
+            }
+            for column, definition in position_migrations.items():
+                if column not in existing_position_columns:
+                    conn.execute(
+                        f"ALTER TABLE stimulation_positions ADD COLUMN {column} {definition}"
+                    )
+            if "image" in existing_position_columns:
+                legacy_images = conn.execute(
+                    """SELECT position_id, image FROM stimulation_positions
+                    WHERE image IS NOT NULL AND image != '' AND image_id IS NULL"""
+                ).fetchall()
+                for row in legacy_images:
+                    image_id = self._resolve_position_image(conn, row["image"])
+                    conn.execute(
+                        "UPDATE stimulation_positions SET image_id = ?, image = NULL WHERE position_id = ?",
+                        (image_id, row["position_id"]),
+                    )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_trials_experiment ON trials(experiment_id)"
             )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_trials_position ON trials(stimulation_position_id)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_trials_position_2 ON trials(stimulation_position_2_id)"
+            )
             conn.commit()
+
+    @staticmethod
+    def _resolve_position_image(conn: sqlite3.Connection, image: Optional[str]) -> Optional[int]:
+        if not image:
+            return None
+        image_hash = hashlib.sha256(image.encode("utf-8")).hexdigest()
+        conn.execute(
+            "INSERT OR IGNORE INTO stimulation_position_images (image_hash, image) VALUES (?, ?)",
+            (image_hash, image),
+        )
+        row = conn.execute(
+            "SELECT image_id FROM stimulation_position_images WHERE image_hash = ?",
+            (image_hash,),
+        ).fetchone()
+        return int(row["image_id"])
+
+    @staticmethod
+    def _mark_json(mark: Optional[Dict[str, float]]) -> Optional[str]:
+        return json.dumps(mark, separators=(",", ":")) if mark else None
+
+    @staticmethod
+    def _position_dict(row: sqlite3.Row) -> Dict[str, Any]:
+        record = dict(row)
+        record["mark"] = json.loads(record["mark"]) if record.get("mark") else None
+        return record
+
+    @staticmethod
+    def _remove_unused_position_image(conn: sqlite3.Connection, image_id: Optional[int]) -> None:
+        if image_id is not None:
+            conn.execute(
+                """DELETE FROM stimulation_position_images
+                WHERE image_id = ? AND NOT EXISTS (
+                    SELECT 1 FROM stimulation_positions WHERE image_id = ?
+                )""",
+                (image_id, image_id),
+            )
+
+    def create_stimulation_position(
+        self,
+        code: str,
+        description: Optional[str] = None,
+        image: Optional[str] = None,
+        mark: Optional[Dict[str, float]] = None,
+    ) -> int:
+        with self.get_connection() as conn:
+            image_id = self._resolve_position_image(conn, image)
+            cursor = conn.execute(
+                """INSERT INTO stimulation_positions
+                (code, description, image_id, mark) VALUES (?, ?, ?, ?)""",
+                (code, description, image_id, self._mark_json(mark)),
+            )
+            conn.commit()
+            return cursor.lastrowid
+
+    def get_stimulation_position(self, position_id: int) -> Optional[Dict[str, Any]]:
+        with self.get_connection() as conn:
+            row = conn.execute(
+                """SELECT p.position_id, p.code, p.description, p.image_id,
+                    p.mark, p.created_at, i.image, (
+                    SELECT COUNT(*) FROM trials t
+                    WHERE t.stimulation_position_id = p.position_id
+                       OR t.stimulation_position_2_id = p.position_id
+                ) AS trial_count
+                FROM stimulation_positions p
+                LEFT JOIN stimulation_position_images i ON i.image_id = p.image_id
+                WHERE p.position_id = ?
+                """,
+                (position_id,),
+            ).fetchone()
+            return self._position_dict(row) if row else None
+
+    def list_stimulation_positions(self) -> List[Dict[str, Any]]:
+        with self.get_connection() as conn:
+            rows = conn.execute(
+                """SELECT p.position_id, p.code, p.description, p.image_id,
+                    p.mark, p.created_at, i.image, (
+                    SELECT COUNT(*) FROM trials t
+                    WHERE t.stimulation_position_id = p.position_id
+                       OR t.stimulation_position_2_id = p.position_id
+                ) AS trial_count
+                FROM stimulation_positions p
+                LEFT JOIN stimulation_position_images i ON i.image_id = p.image_id
+                ORDER BY p.code COLLATE NOCASE, p.position_id"""
+            ).fetchall()
+            return [self._position_dict(row) for row in rows]
+
+    def update_stimulation_position(
+        self,
+        position_id: int,
+        code: str,
+        description: Optional[str] = None,
+        image: Optional[str] = None,
+        mark: Optional[Dict[str, float]] = None,
+    ) -> bool:
+        with self.get_connection() as conn:
+            existing = conn.execute(
+                "SELECT image_id FROM stimulation_positions WHERE position_id = ?",
+                (position_id,),
+            ).fetchone()
+            if not existing:
+                return False
+            old_image_id = existing["image_id"]
+            image_id = self._resolve_position_image(conn, image)
+            cursor = conn.execute(
+                """UPDATE stimulation_positions
+                SET code = ?, description = ?, image_id = ?, mark = ?, image = NULL
+                WHERE position_id = ?""",
+                (code, description, image_id, self._mark_json(mark), position_id),
+            )
+            if old_image_id != image_id:
+                self._remove_unused_position_image(conn, old_image_id)
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def delete_stimulation_position(self, position_id: int) -> bool:
+        with self.get_connection() as conn:
+            row = conn.execute(
+                "SELECT image_id FROM stimulation_positions WHERE position_id = ?",
+                (position_id,),
+            ).fetchone()
+            cursor = conn.execute(
+                "DELETE FROM stimulation_positions WHERE position_id = ?",
+                (position_id,),
+            )
+            if row:
+                self._remove_unused_position_image(conn, row["image_id"])
+            conn.commit()
+            return cursor.rowcount > 0
 
     def insert_experiment(self, title: str, description: Optional[str] = None) -> int:
         query = "INSERT INTO experiment (title, description) VALUES (?, ?)"
@@ -262,7 +424,8 @@ class DatabaseManager:
     def insert_trial(self, trial_data: Dict[str, Any]) -> int:
         keys = [
             "experiment_id", "subject_id", "trial_no", "video_id", "experiment_timestamp", "video_file",
-            "stimulation_time", "stimulation_position", "stimulation_voltage_v",
+            "stimulation_time", "stimulation_position_id", "stimulation_position_2_id",
+            "stimulation_position", "stimulation_voltage_v",
             "stimulation_waveform", "stimulation_high_level_v",
             "stimulation_low_level_v", "stimulation_duty_cycle_pct",
             "stimulation_frequency_hz", "stimulation_duration_s", "stimulation_count",
@@ -302,7 +465,8 @@ class DatabaseManager:
     def update_trial(self, trial_id: int, trial_data: Dict[str, Any]) -> bool:
         """Update the editable fields of one trial while preserving its video identity."""
         allowed = (
-            "experiment_id", "subject_id", "trial_no", "experiment_timestamp", "stimulation_position",
+            "experiment_id", "subject_id", "trial_no", "experiment_timestamp",
+            "stimulation_position_id", "stimulation_position_2_id", "stimulation_position",
             "stimulation_waveform", "stimulation_high_level_v", "stimulation_low_level_v",
             "stimulation_duty_cycle_pct", "stimulation_voltage_v",
             "stimulation_frequency_hz", "response_latency_s", "response_action",

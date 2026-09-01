@@ -64,6 +64,8 @@ class TrialRunner:
             video_file=video_file,
             experiment_timestamp=exp_timestamp,
             stimulation_position=config.stimulus.position,
+            stimulation_position_id=config.stimulus.position_id,
+            stimulation_position_2_id=config.stimulus.position_2_id,
             stimulation_voltage_v=config.stimulus.voltage_v,
             stimulation_waveform=config.stimulus.waveform,
             stimulation_high_level_v=config.stimulus.high_level_v or 0.0,

@@ -17,6 +17,7 @@ class SDG1022XDriver:
         self._rm = None
         self._inst = None
         self._is_connected = False
+        self.last_error: Optional[str] = None
 
     @property
     def is_connected(self) -> bool:
@@ -34,6 +35,7 @@ class SDG1022XDriver:
             return []
 
     def connect(self) -> bool:
+        self.last_error = None
         if self.mock:
             logger.info("SDG1022X running in MOCK mode.")
             self._is_connected = True
@@ -42,32 +44,59 @@ class SDG1022XDriver:
         try:
             import pyvisa
             self._rm = pyvisa.ResourceManager("@py")
-            if not self.resource_name:
-                resources = self.list_resources()
-                # Find SDG or USB instrument if available (62700 is decimal for 0xF4EC)
-                sdg_res = [r for r in resources if ("SDG" in r.upper() or "62700" in r or "F4EC" in r.upper()) and not r.startswith("ASRL")]
-                if not sdg_res:
-                    sdg_res = [r for r in resources if r.startswith("USB")]
-                
-                if sdg_res:
-                    self.resource_name = sdg_res[0]
-                elif resources:
-                    # Filter out serial ports if USB instrument is not found
-                    non_asrl = [r for r in resources if not r.startswith("ASRL")]
-                    self.resource_name = non_asrl[0] if non_asrl else resources[0]
-                else:
-                    raise ConnectionError("No VISA resources found.")
+            if self.resource_name:
+                candidates = [self.resource_name]
+            else:
+                resources = list(self._rm.list_resources())
+                # Never fall back to ASRL: that is normally the XIAO serial port.
+                # Prefer the known SIGLENT VID, then probe other USB/LAN instruments.
+                candidates = sorted(
+                    (r for r in resources if not r.upper().startswith("ASRL")),
+                    key=lambda r: (
+                        "F4EC" not in r.upper() and "62700" not in r,
+                        not r.upper().startswith("USB"),
+                        r,
+                    ),
+                )
+            if not candidates:
+                raise ConnectionError("No USB or LAN VISA instruments found.")
 
-            logger.info(f"Connecting to SDG1022X at {self.resource_name}...")
-            self._inst = self._rm.open_resource(self.resource_name)
-            self._inst.timeout = 3000  # 3s timeout
-            idn = self._query("*IDN?")
-            logger.info(f"Connected to SDG1022X: {idn}")
-            self._is_connected = True
-            return True
+            failures = []
+            for candidate in candidates:
+                inst = None
+                try:
+                    logger.info(f"Probing SDG1022X at {candidate}...")
+                    inst = self._rm.open_resource(candidate)
+                    inst.timeout = 3000
+                    inst.write_termination = "\n"
+                    idn = inst.query("*IDN?").strip()
+                    normalized_idn = idn.upper()
+                    if "SIGLENT" not in normalized_idn or "SDG" not in normalized_idn:
+                        raise ConnectionError(f"unexpected *IDN? response: {idn!r}")
+                    self._inst = inst
+                    self.resource_name = candidate
+                    self._is_connected = True
+                    logger.info(f"Connected to SDG1022X: {idn}")
+                    return True
+                except Exception as exc:
+                    failures.append(f"{candidate}: {exc}")
+                    if inst is not None:
+                        try:
+                            inst.close()
+                        except Exception:
+                            pass
+            raise ConnectionError("; ".join(failures))
         except Exception as e:
             logger.error(f"Failed to connect to SDG1022X: {e}")
+            self.last_error = str(e)
             self._is_connected = False
+            self._inst = None
+            if self._rm:
+                try:
+                    self._rm.close()
+                except Exception:
+                    pass
+                self._rm = None
             return False
 
     def disconnect(self) -> None:

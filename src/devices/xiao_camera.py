@@ -27,6 +27,7 @@ class XiaoCameraDriver:
         mock: bool = False,
         output_dir: Optional[Path] = None,
     ):
+        self._requested_port = port
         self.port = port
         self.baudrate = baudrate
         self.timeout = timeout
@@ -63,6 +64,40 @@ class XiaoCameraDriver:
             logger.warning("pyserial is not installed. Install via `pip install pyserial`.")
             return []
 
+    @staticmethod
+    def _candidate_ports() -> List[str]:
+        """Return likely XIAO ports first, while excluding virtual Bluetooth ports."""
+        try:
+            import serial.tools.list_ports
+            ports = list(serial.tools.list_ports.comports())
+        except ImportError:
+            return []
+
+        def score(port) -> tuple[int, str]:
+            details = " ".join(
+                str(value or "")
+                for value in (
+                    port.device,
+                    getattr(port, "description", ""),
+                    getattr(port, "manufacturer", ""),
+                    getattr(port, "product", ""),
+                    getattr(port, "hwid", ""),
+                )
+            ).lower()
+            if "bluetooth" in details:
+                return (99, port.device)
+            if "xiao" in details or "seeed" in details or "esp32" in details:
+                return (0, port.device)
+            if "usbmodem" in details:
+                return (1, port.device)
+            if "usbserial" in details or "wch" in details or "cp210" in details:
+                return (2, port.device)
+            return (10, port.device)
+
+        # Do not open unrelated debug consoles or built-in serial devices just
+        # because they happen to be present on the Mac.
+        return [p.device for p in sorted(ports, key=score) if score(p)[0] <= 2]
+
     def connect(self) -> bool:
         self.last_error = None
         if self.mock:
@@ -72,40 +107,51 @@ class XiaoCameraDriver:
 
         try:
             import serial
-            if not self.port:
-                ports = self.list_ports()
-                # Find usbmodem or ESP32 port
-                esp_ports = [p for p in ports if "usbmodem" in p or "usbserial" in p]
-                if esp_ports:
-                    self.port = esp_ports[0]
-                elif ports:
-                    self.port = ports[0]
-                else:
-                    raise ConnectionError("No serial ports found for XIAO ESP32S3.")
-
-            logger.info(f"Connecting to XIAO ESP32S3 on {self.port} at {self.baudrate} baud...")
-            self._serial = serial.Serial(
-                port=self.port,
-                baudrate=self.baudrate,
-                timeout=self.timeout
+            candidates = (
+                [self._requested_port]
+                if self._requested_port
+                else self._candidate_ports()
             )
-            self._serial.timeout = 0.25
-            self._serial.dtr = True
-            self._serial.rts = True
-            # Give board a moment to stabilize
-            time.sleep(1.0)
-            self._serial.reset_input_buffer()
-            self._serial.reset_output_buffer()
-            
-            # Send PING to check readiness
-            self._is_connected = True
-            is_ready = self.ping()
-            if not is_ready:
-                raise ConnectionError(
-                    self.last_error
-                    or "Serial port opened, but the recorder firmware did not answer PING."
-                )
-            return True
+            if not candidates:
+                raise ConnectionError("No serial ports found for XIAO ESP32S3.")
+
+            failures = []
+            for candidate in candidates:
+                try:
+                    logger.info(
+                        f"Connecting to XIAO ESP32S3 on {candidate} at {self.baudrate} baud..."
+                    )
+                    self._serial = serial.Serial(
+                        port=candidate,
+                        baudrate=self.baudrate,
+                        timeout=0.25,
+                        write_timeout=2.0,
+                    )
+                    # Opening USB CDC can reset the ESP32-S3. Camera/PSRAM setup can
+                    # take several seconds, so probe repeatedly instead of failing once.
+                    self._is_connected = True
+                    deadline = time.monotonic() + 8.0
+                    while time.monotonic() < deadline:
+                        if self.ping(timeout=min(1.0, deadline - time.monotonic())):
+                            self.port = candidate
+                            self.last_error = None
+                            return True
+                        time.sleep(0.15)
+                    raise ConnectionError(
+                        self.last_error
+                        or "recorder firmware did not become ready within 8 seconds"
+                    )
+                except Exception as exc:
+                    failures.append(f"{candidate}: {exc}")
+                    if self._serial:
+                        try:
+                            self._serial.close()
+                        except Exception:
+                            pass
+                    self._serial = None
+                    self._is_connected = False
+                    self.last_error = None
+            raise ConnectionError("; ".join(failures))
         except Exception as e:
             logger.error(f"Failed to connect to XIAO Camera: {e}")
             self.last_error = str(e)
@@ -171,13 +217,16 @@ class XiaoCameraDriver:
                 return response
         return ""
 
-    def ping(self) -> bool:
+    def ping(self, timeout: float = 2.0) -> bool:
         """Pings the device to check communication."""
         if self.mock:
             return True
         try:
-            self._send_command("PING")
-            resp = self._wait_for_response(("READY", "PONG", "OK", "ERROR"), timeout=2.0)
+            with self._serial_lock:
+                self._send_command("PING")
+                resp = self._wait_for_response(
+                    ("READY", "PONG", "OK", "ERROR"), timeout=timeout
+                )
             if "ERROR" in resp:
                 self.last_error = resp
             return "READY" in resp or "PONG" in resp or "OK" in resp

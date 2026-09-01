@@ -30,6 +30,8 @@ class StimulusConfig:
     count: int = 1
     interval_s: float = 0.0
     position: str = "Head"
+    position_id: Optional[int] = None
+    position_2_id: Optional[int] = None
 
     def __post_init__(self) -> None:
         self.waveform = self.waveform.upper()
@@ -120,6 +122,8 @@ class TrialResult:
     
     # Stimulus params
     stimulation_position: str = ""
+    stimulation_position_id: Optional[int] = None
+    stimulation_position_2_id: Optional[int] = None
     stimulation_voltage_v: float = 0.0
     stimulation_waveform: str = "SQUARE"
     stimulation_high_level_v: float = 0.0

@@ -22,6 +22,24 @@ CREATE TABLE IF NOT EXISTS experiment (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS stimulation_position_images (
+    image_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    image_hash TEXT NOT NULL UNIQUE,
+    image TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS stimulation_positions (
+    position_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    description TEXT,
+    image TEXT, -- legacy migration source; new records use image_id
+    image_id INTEGER,
+    mark TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (image_id) REFERENCES stimulation_position_images (image_id)
+);
+
 CREATE TABLE IF NOT EXISTS trials (
     trial_id INTEGER PRIMARY KEY AUTOINCREMENT,
     experiment_id INTEGER,
@@ -33,6 +51,8 @@ CREATE TABLE IF NOT EXISTS trials (
     
     -- Stimulation Parameters & Timestamps
     stimulation_time TEXT,
+    stimulation_position_id INTEGER,
+    stimulation_position_2_id INTEGER,
     stimulation_position TEXT,
     stimulation_voltage_v REAL NOT NULL,
     stimulation_waveform TEXT NOT NULL DEFAULT 'SQUARE',
@@ -58,7 +78,9 @@ CREATE TABLE IF NOT EXISTS trials (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     
     FOREIGN KEY (experiment_id) REFERENCES experiment (experiment_id),
-    FOREIGN KEY (subject_id) REFERENCES subjects (subject_id)
+    FOREIGN KEY (subject_id) REFERENCES subjects (subject_id),
+    FOREIGN KEY (stimulation_position_id) REFERENCES stimulation_positions (position_id),
+    FOREIGN KEY (stimulation_position_2_id) REFERENCES stimulation_positions (position_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_trials_subject ON trials(subject_id);

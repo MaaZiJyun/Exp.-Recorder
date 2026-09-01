@@ -83,7 +83,35 @@ bool initCamera() {
   config.fb_count = psramFound() ? 2 : 1;
   config.grab_mode = CAMERA_GRAB_LATEST;
   config.fb_location = psramFound() ? CAMERA_FB_IN_PSRAM : CAMERA_FB_IN_DRAM;
-  return esp_camera_init(&config) == ESP_OK;
+  if (esp_camera_init(&config) != ESP_OK) {
+    return false;
+  }
+  // The XIAO camera is mounted with a mirrored optical orientation. Correct
+  // it at the sensor so both live preview and newly recorded videos are true
+  // left/right orientation without relying on browser CSS transforms.
+  sensor_t *sensor = esp_camera_sensor_get();
+  if (sensor) {
+    sensor->set_hmirror(sensor, 1);
+  }
+  return true;
+}
+
+bool initCameraWithRetry() {
+  for (uint8_t attempt = 0; attempt < 3; attempt++) {
+    if (initCamera()) return true;
+    esp_camera_deinit();
+    delay(400);
+  }
+  return false;
+}
+
+camera_fb_t *captureFrameWithRetry() {
+  for (uint8_t attempt = 0; attempt < 3; attempt++) {
+    camera_fb_t *frame = esp_camera_fb_get();
+    if (frame) return frame;
+    delay(15);
+  }
+  return nullptr;
 }
 
 void startStream() {
@@ -114,7 +142,7 @@ void stopStream() {
 
 void streamFrame() {
   if (!isStreaming) return;
-  camera_fb_t *frame = esp_camera_fb_get();
+  camera_fb_t *frame = captureFrameWithRetry();
   if (!frame) {
     Serial.println("ERROR Camera frame capture failed");
     return;
@@ -134,7 +162,7 @@ void captureFrame() {
     Serial.println("ERROR Camera not ready");
     return;
   }
-  camera_fb_t *frame = esp_camera_fb_get();
+  camera_fb_t *frame = captureFrameWithRetry();
   if (!frame) {
     Serial.println("ERROR Camera frame capture failed");
     return;
@@ -170,7 +198,7 @@ void setup() {
   Serial.begin(2000000);
   Serial.setTimeout(20);
   delay(1000);
-  cameraReady = initCamera();
+  cameraReady = initCameraWithRetry();
   Serial.println(cameraReady ? "READY" : "ERROR Camera init failed");
 }
 

@@ -23,6 +23,7 @@ import {
 type DeviceStatus = {
   mock: boolean;
   sdg_connected: boolean;
+  sdg_error: string | null;
   camera_connected: boolean;
   camera_recording: boolean;
   camera_error: string | null;
@@ -37,6 +38,8 @@ type Trial = {
   video_id: string;
   experiment_timestamp: string;
   stimulation_time: string | null;
+  stimulation_position_id: number | null;
+  stimulation_position_2_id: number | null;
   stimulation_position: string;
   stimulation_voltage_v: number;
   stimulation_waveform: string;
@@ -72,11 +75,23 @@ type SubjectRecord = {
   trial_count: number;
 };
 
+type StimulationPosition = {
+  position_id: number;
+  code: string;
+  description: string | null;
+  image_id: number | null;
+  image: string | null;
+  mark: { x: number; y: number } | null;
+  created_at: string;
+  trial_count: number;
+};
+
 type RowEdit = {
   subject_id: string;
   trial_no: string;
   experiment_timestamp: string;
-  stimulation_position: string;
+  stimulation_position_id: string;
+  stimulation_position_2_id: string;
   stimulation_waveform: string;
   stimulation_high_level_v: string;
   stimulation_low_level_v: string;
@@ -107,7 +122,8 @@ type TrialForm = {
   duration_s: string;
   count: string;
   interval_s: string;
-  position: string;
+  position_id: string;
+  position_2_id: string;
   baseline_duration_s: string;
   post_stim_duration_s: string;
 };
@@ -129,7 +145,8 @@ const initialForm: TrialForm = {
   duration_s: "",
   count: "",
   interval_s: "",
-  position: "",
+  position_id: "",
+  position_2_id: "",
   baseline_duration_s: "",
   post_stim_duration_s: "",
 };
@@ -253,6 +270,69 @@ function StatusDot({ active }: { active: boolean }) {
   );
 }
 
+function TrialPositionPreview({
+  trial,
+  positions,
+  showDetails = false,
+}: {
+  trial: Trial;
+  positions: StimulationPosition[];
+  showDetails?: boolean;
+}) {
+  const selectedPositions = [
+    positions.find(
+      (position) => position.position_id === trial.stimulation_position_id,
+    ),
+    positions.find(
+      (position) => position.position_id === trial.stimulation_position_2_id,
+    ),
+  ].filter((position): position is StimulationPosition => Boolean(position));
+  const map = selectedPositions.find((position) => position.image)?.image ?? null;
+
+  if (!map) {
+    return (
+      <div className="trial-position-empty">
+        <span>POSITION MAP</span>
+        <small>该 Trial 没有可用的刺激位置图片</small>
+      </div>
+    );
+  }
+
+  return (
+    <div className="trial-position-preview">
+      <div className="trial-position-map">
+        <img src={map} alt={`刺激位置 ${trial.stimulation_position}`} />
+        {selectedPositions.map(
+          (position) =>
+            position.mark && (
+              <span
+                key={position.position_id}
+                className="trial-position-marker"
+                style={{
+                  left: `${position.mark.x * 100}%`,
+                  top: `${position.mark.y * 100}%`,
+                }}
+              >
+                <i />
+                <b>{position.code}</b>
+              </span>
+            ),
+        )}
+      </div>
+      {showDetails && (
+        <div className="trial-position-details">
+          {selectedPositions.map((position) => (
+            <div key={position.position_id}>
+              <strong>{position.code}</strong>
+              <p>{position.description || "暂无描述"}</p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Home() {
   const [view, setView] = useState<"execute" | "manage">("execute");
   const [devices, setDevices] = useState<DeviceStatus | null>(null);
@@ -279,7 +359,9 @@ export default function Home() {
   );
   const [experimentSaving, setExperimentSaving] = useState(false);
   const [experimentDeleting, setExperimentDeleting] = useState(false);
-  const [manageTab, setManageTab] = useState<"experiments" | "subjects">(
+  const [manageTab, setManageTab] = useState<
+    "experiments" | "subjects" | "positions"
+  >(
     "experiments",
   );
   const [subjects, setSubjects] = useState<SubjectRecord[]>([]);
@@ -288,6 +370,21 @@ export default function Home() {
   const [subjectEditorId, setSubjectEditorId] = useState<string | null>(null);
   const [subjectSaving, setSubjectSaving] = useState(false);
   const [subjectDeleting, setSubjectDeleting] = useState<string | null>(null);
+  const [positions, setPositions] = useState<StimulationPosition[]>([]);
+  const [positionQuery, setPositionQuery] = useState("");
+  const [editingPosition, setEditingPosition] = useState(false);
+  const [positionEditorId, setPositionEditorId] = useState<number | null>(null);
+  const [positionSaving, setPositionSaving] = useState(false);
+  const [positionDeleting, setPositionDeleting] = useState<number | null>(null);
+  const [selectedPositionImageId, setSelectedPositionImageId] = useState<
+    number | null
+  >(null);
+  const [positionDraft, setPositionDraft] = useState({
+    code: "",
+    description: "",
+    image: "",
+    mark: null as { x: number; y: number } | null,
+  });
   const [subjectDraft, setSubjectDraft] = useState({
     subject_id: "",
     body_length_cm: "",
@@ -329,25 +426,6 @@ export default function Home() {
   const managedExperimentRef = useRef<number | null>(null);
   const logWindowRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    const saved = window.localStorage.getItem("exp-recorder-camera-transform");
-    if (!saved) return;
-    try {
-      const value = JSON.parse(saved) as { mirrored?: boolean; rotated?: boolean };
-      setCameraMirrored(Boolean(value.mirrored));
-      setCameraFlipped(Boolean(value.rotated));
-    } catch {
-      // Ignore an invalid local preference.
-    }
-  }, []);
-
-  useEffect(() => {
-    window.localStorage.setItem(
-      "exp-recorder-camera-transform",
-      JSON.stringify({ mirrored: cameraMirrored, rotated: cameraFlipped }),
-    );
-  }, [cameraMirrored, cameraFlipped]);
-
   const loadTrials = useCallback(
     async (subject = "", experimentId: number | null = null) => {
       const params = new URLSearchParams();
@@ -373,6 +451,27 @@ export default function Home() {
   const loadSubjects = useCallback(async () => {
     const records = await api<SubjectRecord[]>("/subjects");
     setSubjects(records);
+    return records;
+  }, []);
+
+  const loadPositions = useCallback(async () => {
+    const records = await api<StimulationPosition[]>("/stimulation-positions");
+    setPositions(records);
+    setForm((current) => ({
+      ...current,
+      position_id:
+        current.position_id && records.some(
+          (item) => String(item.position_id) === current.position_id,
+        )
+          ? current.position_id
+          : "",
+      position_2_id:
+        current.position_2_id && records.some(
+          (item) => String(item.position_id) === current.position_2_id,
+        )
+          ? current.position_2_id
+          : "",
+    }));
     return records;
   }, []);
 
@@ -403,6 +502,7 @@ export default function Home() {
           loadTrials(filterRef.current, managedExperimentRef.current),
           loadExperiments(),
           loadSubjects(),
+          loadPositions(),
         ]);
         setNotice({
           kind: taskState.status === "COMPLETED" ? "success" : "error",
@@ -416,7 +516,7 @@ export default function Home() {
     } catch {
       setDevices(null);
     }
-  }, [loadExperiments, loadSubjects, loadTrials]);
+  }, [loadExperiments, loadPositions, loadSubjects, loadTrials]);
 
   useEffect(() => {
     const initialLoad = window.setTimeout(() => {
@@ -438,6 +538,7 @@ export default function Home() {
           setTrials([]);
         });
       void loadSubjects().catch(() => setSubjects([]));
+      void loadPositions().catch(() => setPositions([]));
       void refresh();
       void api<Record<string, string | number>>("/config")
         .then((defaults) => {
@@ -465,7 +566,7 @@ export default function Home() {
       window.clearInterval(timer);
       window.clearInterval(previewTimer);
     };
-  }, [loadExperiments, loadSubjects, loadTrials, refresh]);
+  }, [loadExperiments, loadPositions, loadSubjects, loadTrials, refresh]);
 
   useEffect(() => {
     const logWindow = logWindowRef.current;
@@ -486,7 +587,12 @@ export default function Home() {
         text:
           state.sdg_connected && state.camera_connected
             ? "所有硬件已连接。"
-            : "部分硬件连接失败，请检查线缆与固件。",
+            : [
+                !state.sdg_connected && `SDG1022X: ${state.sdg_error || "连接失败"}`,
+                !state.camera_connected && `XIAO: ${state.camera_error || "连接失败"}`,
+              ]
+                .filter(Boolean)
+                .join("；"),
       });
     } catch (error) {
       setNotice({
@@ -709,12 +815,111 @@ export default function Home() {
     }
   };
 
-  const startTrial = async () => {
-    setNotice(null);
-    if (!runExperimentId || !form.subject_id.trim()) {
+  const newPosition = () => {
+    setPositionEditorId(null);
+    setPositionDraft({ code: "", description: "", image: "", mark: null });
+    setEditingPosition(true);
+  };
+
+  const editPosition = (position: StimulationPosition) => {
+    setPositionEditorId(position.position_id);
+    setPositionDraft({
+      code: position.code,
+      description: position.description ?? "",
+      image: position.image ?? "",
+      mark: position.mark,
+    });
+    setEditingPosition(true);
+  };
+
+  const savePosition = async () => {
+    if (!positionDraft.code.trim()) {
+      setNotice({ kind: "error", text: "Position code 不能为空。" });
+      return;
+    }
+    setPositionSaving(true);
+    try {
+      const record = await api<StimulationPosition>(
+        positionEditorId === null
+          ? "/stimulation-positions"
+          : `/stimulation-positions/${positionEditorId}`,
+        {
+          method: positionEditorId === null ? "POST" : "PUT",
+          body: JSON.stringify({
+            code: positionDraft.code.trim(),
+            description: positionDraft.description.trim() || null,
+            image: positionDraft.image || null,
+            mark: positionDraft.mark,
+          }),
+        },
+      );
+      await loadPositions();
+      setEditingPosition(false);
+      setField("position_id", String(record.position_id));
+      setSelectedPositionImageId(record.image_id);
+      setNotice({ kind: "success", text: `Position “${record.code}” 已保存。` });
+    } catch (error) {
       setNotice({
         kind: "error",
-        text: "请先选择 Experiment 并填写 Subject ID。",
+        text: error instanceof Error ? error.message : "保存失败",
+      });
+    } finally {
+      setPositionSaving(false);
+    }
+  };
+
+  const deletePosition = async (position: StimulationPosition) => {
+    if (!window.confirm(`确定删除 Position “${position.code}”？`)) return;
+    setPositionDeleting(position.position_id);
+    try {
+      await api(`/stimulation-positions/${position.position_id}`, {
+        method: "DELETE",
+      });
+      await loadPositions();
+      setNotice({ kind: "success", text: `Position “${position.code}” 已删除。` });
+    } catch (error) {
+      setNotice({
+        kind: "error",
+        text: error instanceof Error ? error.message : "删除失败",
+      });
+    } finally {
+      setPositionDeleting(null);
+    }
+  };
+
+  const readPositionImage = (file: File | undefined) => {
+    if (!file) return;
+    if (!file.type.match(/^image\/(png|jpeg|webp|gif)$/)) {
+      setNotice({ kind: "error", text: "请选择 PNG、JPEG、WebP 或 GIF 图片。" });
+      return;
+    }
+    if (file.size > 2_000_000) {
+      setNotice({ kind: "error", text: "Position 图片不能超过 2 MB。" });
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () =>
+      setPositionDraft((current) => ({
+        ...current,
+        image: typeof reader.result === "string" ? reader.result : "",
+        mark: null,
+      }));
+    reader.readAsDataURL(file);
+  };
+
+  const startTrial = async () => {
+    setNotice(null);
+    if (
+      !runExperimentId ||
+      !form.subject_id.trim() ||
+      !form.position_id ||
+      !form.position_2_id ||
+      form.position_id === form.position_2_id ||
+      !runPositionPreview
+    ) {
+      setNotice({
+        kind: "error",
+        text: "请选择同一张图片上两个不同且已设置 mark 的 Stimulation Position。",
       });
       return;
     }
@@ -736,7 +941,8 @@ export default function Home() {
           duration_s: Number(form.duration_s),
           count: Number(form.count),
           interval_s: Number(form.interval_s),
-          position: form.position,
+          position_id: Number(form.position_id),
+          position_2_id: Number(form.position_2_id),
           baseline_duration_s: Number(form.baseline_duration_s),
           post_stim_duration_s: Number(form.post_stim_duration_s),
         }),
@@ -784,7 +990,9 @@ export default function Home() {
       subject_id: trial.subject_id,
       trial_no: String(trial.trial_no),
       experiment_timestamp: trial.experiment_timestamp ?? "",
-      stimulation_position: trial.stimulation_position ?? "",
+      stimulation_position_id: trial.stimulation_position_id?.toString() ?? "",
+      stimulation_position_2_id:
+        trial.stimulation_position_2_id?.toString() ?? "",
       stimulation_waveform: trial.stimulation_waveform ?? "SQUARE",
       stimulation_high_level_v: String(
         trial.stimulation_high_level_v ?? trial.stimulation_voltage_v,
@@ -814,6 +1022,10 @@ export default function Home() {
         body: JSON.stringify({
           ...rowEdit,
           trial_no: Number(rowEdit.trial_no),
+          stimulation_position_id: Number(rowEdit.stimulation_position_id),
+          stimulation_position_2_id: Number(
+            rowEdit.stimulation_position_2_id,
+          ),
           stimulation_high_level_v: Number(rowEdit.stimulation_high_level_v),
           stimulation_low_level_v: Number(rowEdit.stimulation_low_level_v),
           stimulation_duty_cycle_pct: Number(
@@ -829,6 +1041,7 @@ export default function Home() {
         loadTrials(filterRef.current, managedExperimentRef.current),
         loadExperiments(),
         loadSubjects(),
+        loadPositions(),
       ]);
       if (selected?.trial_id === editingId) setSelected(null);
       setEditingId(null);
@@ -859,6 +1072,7 @@ export default function Home() {
         loadTrials(filterRef.current, managedExperimentRef.current),
         loadExperiments(),
         loadSubjects(),
+        loadPositions(),
       ]);
       setNotice({
         kind: "success",
@@ -919,6 +1133,7 @@ export default function Home() {
         loadTrials(filterRef.current, managedExperimentRef.current),
         loadExperiments(),
         loadSubjects(),
+        loadPositions(),
       ]);
       setNotice({ kind: "success", text: "Trial 标注已保存到数据库。" });
     } catch (error) {
@@ -1047,6 +1262,34 @@ export default function Home() {
           .includes(normalizedSubjectQuery),
       )
     : subjects;
+  const normalizedPositionQuery = positionQuery.trim().toLowerCase();
+  const visiblePositions = normalizedPositionQuery
+    ? positions.filter((position) =>
+        `${position.code} ${position.description ?? ""}`
+          .toLowerCase()
+          .includes(normalizedPositionQuery),
+      )
+    : positions;
+  const positionImages = positions.filter(
+    (position, index, records) =>
+      position.image_id !== null &&
+      records.findIndex((item) => item.image_id === position.image_id) === index,
+  );
+  const activePositionImage =
+    positionImages.find(
+      (position) => position.image_id === selectedPositionImageId,
+    ) ?? positionImages[0] ?? null;
+  const runPositionOne = positions.find(
+    (position) => String(position.position_id) === form.position_id,
+  );
+  const runPositionTwo = positions.find(
+    (position) => String(position.position_id) === form.position_2_id,
+  );
+  const runPositionPreview =
+    runPositionOne?.image_id !== null &&
+    runPositionOne?.image_id === runPositionTwo?.image_id
+      ? runPositionOne
+      : null;
   return (
     <AppShell
       workspace={view}
@@ -1172,33 +1415,58 @@ export default function Home() {
             >
               Subjects
             </button>
+            <button
+              type="button"
+              className={`rounded-md px-4 py-2 text-sm font-semibold ${manageTab === "positions" ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-500"}`}
+              onClick={() => setManageTab("positions")}
+            >
+              Positions
+            </button>
           </div>
           <div className="relative min-w-0 flex-1">
             <MagnifyingGlassIcon className="pointer-events-none absolute left-3 top-1/2 size-5 -translate-y-1/2 text-zinc-400" />
             <Input
               type="search"
               value={
-                manageTab === "experiments" ? experimentQuery : subjectQuery
+                manageTab === "experiments"
+                  ? experimentQuery
+                  : manageTab === "subjects"
+                    ? subjectQuery
+                    : positionQuery
               }
               onChange={(event) =>
                 manageTab === "experiments"
                   ? setExperimentQuery(event.target.value)
-                  : setSubjectQuery(event.target.value)
+                  : manageTab === "subjects"
+                    ? setSubjectQuery(event.target.value)
+                    : setPositionQuery(event.target.value)
               }
               placeholder={
                 manageTab === "experiments"
                   ? "搜索 Experiment 标题、描述或 ID…"
-                  : "搜索 Subject ID 或备注…"
+                  : manageTab === "subjects"
+                    ? "搜索 Subject ID 或备注…"
+                    : "搜索 Position code 或描述…"
               }
               className="pl-10"
             />
           </div>
           <Button
-            onClick={manageTab === "experiments" ? newExperiment : newSubject}
+            onClick={
+              manageTab === "experiments"
+                ? newExperiment
+                : manageTab === "subjects"
+                  ? newSubject
+                  : newPosition
+            }
             className="shrink-0"
           >
             <PlusIcon className="size-4" />
-            {manageTab === "experiments" ? "新建 Experiment" : "新建 Subject"}
+            {manageTab === "experiments"
+              ? "新建 Experiment"
+              : manageTab === "subjects"
+                ? "新建 Subject"
+                : "新建 Position"}
           </Button>
         </section>
       )}
@@ -1420,6 +1688,127 @@ export default function Home() {
       </Dialog>
 
       <Dialog
+        open={editingPosition}
+        title={positionEditorId === null ? "New Position" : "Edit Position"}
+        closeLabel="关闭"
+        onClose={() => setEditingPosition(false)}
+      >
+        <div className="grid gap-5">
+          <Field label="CODE" hint="例如 A1；只能使用字母、数字、下划线和连字符。">
+            <Input
+              value={positionDraft.code}
+              onChange={(event) =>
+                setPositionDraft((current) => ({
+                  ...current,
+                  code: event.target.value,
+                }))
+              }
+              placeholder="A1"
+              autoFocus
+            />
+          </Field>
+          <Field label="DESCRIPTION">
+            <Textarea
+              value={positionDraft.description}
+              onChange={(event) =>
+                setPositionDraft((current) => ({
+                  ...current,
+                  description: event.target.value,
+                }))
+              }
+              placeholder="位置说明、解剖标记或操作备注…"
+            />
+          </Field>
+          <Field label="IMAGE" hint="PNG、JPEG、WebP 或 GIF，最大 2 MB。">
+            {positionImages.length > 0 && (
+              <Select
+                value={
+                  positions.find(
+                    (position) =>
+                      position.image === positionDraft.image && position.image_id,
+                  )?.image_id ?? ""
+                }
+                onChange={(event) => {
+                  const selectedImage = positionImages.find(
+                    (position) =>
+                      String(position.image_id) === event.target.value,
+                  );
+                  setPositionDraft((current) => ({
+                    ...current,
+                    image: selectedImage?.image ?? "",
+                    mark: null,
+                  }));
+                }}
+              >
+                <option value="">选择已有图片…</option>
+                {positionImages.map((position) => (
+                  <option key={position.image_id} value={position.image_id ?? ""}>
+                    Image {position.image_id} · {position.code}
+                  </option>
+                ))}
+              </Select>
+            )}
+            <Input
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              onChange={(event) => readPositionImage(event.target.files?.[0])}
+            />
+          </Field>
+          {positionDraft.image && (
+            <div className="grid gap-3">
+              <p className="text-xs text-zinc-500">点击图片设置 mark。</p>
+              <div className="relative mx-auto w-fit max-w-full overflow-hidden rounded-xl border border-zinc-200">
+                <img
+                  src={positionDraft.image}
+                  alt="Position preview"
+                  className="block max-h-64 max-w-full cursor-crosshair"
+                  onClick={(event) => {
+                    const bounds = event.currentTarget.getBoundingClientRect();
+                    setPositionDraft((current) => ({
+                      ...current,
+                      mark: {
+                        x: (event.clientX - bounds.left) / bounds.width,
+                        y: (event.clientY - bounds.top) / bounds.height,
+                      },
+                    }));
+                  }}
+                />
+                {positionDraft.mark && (
+                  <span
+                    className="pointer-events-none absolute size-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-red-500 shadow"
+                    style={{
+                      left: `${positionDraft.mark.x * 100}%`,
+                      top: `${positionDraft.mark.y * 100}%`,
+                    }}
+                  />
+                )}
+              </div>
+              <Button
+                variant="secondary"
+                onClick={() =>
+                  setPositionDraft((current) => ({
+                    ...current,
+                    image: "",
+                    mark: null,
+                  }))
+                }
+              >
+                移除图片
+              </Button>
+            </div>
+          )}
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setEditingPosition(false)}>
+              取消
+            </Button>
+            <Button onClick={() => void savePosition()} disabled={positionSaving}>
+              {positionSaving ? "保存中…" : "保存 Position"}
+            </Button>
+          </div>
+        </div>
+      </Dialog>
+
+      <Dialog
         open={configurationOpen}
         title="Trial 参数配置"
         closeLabel="关闭"
@@ -1514,12 +1903,6 @@ export default function Home() {
                   }
                 />
               </Field>
-              <Field label="POSITION" className="sm:col-span-2">
-                <Input
-                  value={form.position}
-                  onChange={(event) => setField("position", event.target.value)}
-                />
-              </Field>
             </div>
           </section>
           <section className="border-t border-zinc-200 pt-5">
@@ -1553,6 +1936,42 @@ export default function Home() {
             <Button onClick={() => setConfigurationOpen(false)}>完成</Button>
           </div>
         </div>
+      </Dialog>
+
+      <Dialog
+        open={selected !== null}
+        title={
+          selected
+            ? `Playback · ${selected.subject_id} · Trial ${selected.trial_no}`
+            : "Playback"
+        }
+        closeLabel="关闭 Playback"
+        onClose={() => setSelected(null)}
+        size="wide"
+      >
+        {selected && (
+          <div className="playback-window-grid">
+            <section>
+              <span className="playback-window-label">
+                STIMULATION POSITION · {selected.stimulation_position}
+              </span>
+              <TrialPositionPreview
+                trial={selected}
+                positions={positions}
+                showDetails
+              />
+            </section>
+            <section>
+              <span className="playback-window-label">VIDEO PLAYBACK</span>
+              <video
+                key={selected.trial_id}
+                controls
+                preload="metadata"
+                src={`/backend/trials/${selected.trial_id}/video`}
+              />
+            </section>
+          </div>
+        )}
       </Dialog>
 
       <section
@@ -1635,7 +2054,7 @@ export default function Home() {
                   <div className="section-heading">
                     <span>LIVE</span>
                     <h2>
-                      {selected || pendingTrial
+                      {pendingTrial
                         ? "Annotation video"
                         : running
                           ? "Recording monitor"
@@ -1643,10 +2062,10 @@ export default function Home() {
                     </h2>
                   </div>
                   <div
-                    className={`camera-mode ${selected || pendingTrial ? "playback" : running ? "recording" : "idle"}`}
+                    className={`camera-mode ${pendingTrial ? "playback" : running ? "recording" : "idle"}`}
                   >
                     <i />
-                    {selected || pendingTrial
+                    {pendingTrial
                       ? "PLAYBACK"
                       : running
                         ? "REC"
@@ -1671,51 +2090,55 @@ export default function Home() {
                     </button>
                   </div>
                 </div>
-                <div className="camera-viewport">
-                  {selected || pendingTrial ? (
-                    <video
-                      key={selected?.trial_id ?? pendingTrial?.video_id}
-                      style={{
-                        transform: `${cameraMirrored ? "scaleX(-1) " : ""}${cameraFlipped ? "rotate(90deg)" : ""}`.trim() || "none",
-                      }}
-                      controls
-                      preload="metadata"
-                      src={
-                        selected?.trial_id
-                          ? `/backend/trials/${selected.trial_id}/video`
-                          : "/backend/pending-trial/video"
-                      }
-                    />
-                  ) : devices?.camera_connected && !devices.mock ? (
-                    <img
-                      src={`/backend/camera/frame?t=${previewTick}`}
-                      alt={running ? "实验录像实时画面" : "摄像机空闲实时预览"}
-                      style={{
-                        transform: `${cameraMirrored ? "scaleX(-1) " : ""}${cameraFlipped ? "rotate(90deg)" : ""}`.trim() || "none",
-                      }}
-                    />
-                  ) : (
-                    <div className="camera-empty">
-                      <span>◉</span>
-                      <p>
-                        {devices?.mock ? "SIMULATION MODE" : "CAMERA OFFLINE"}
-                      </p>
-                      <small>
-                        {devices?.mock
-                          ? "真实设备连接后显示实时画面"
-                          : "连接 XIAO ESP32S3 后显示实时画面"}
-                      </small>
+                {pendingTrial ? (
+                  <div className="playback-pair">
+                    <div className="playback-position-pane">
+                      <span className="playback-pane-label">
+                        STIMULATION POSITION ·{" "}
+                        {pendingTrial.stimulation_position}
+                      </span>
+                      <TrialPositionPreview
+                        trial={pendingTrial}
+                        positions={positions}
+                      />
                     </div>
-                  )}
-                </div>
-                {selected && (
-                  <button
-                    type="button"
-                    className="return-live"
-                    onClick={() => setSelected(null)}
-                  >
-                    ← RETURN TO LIVE CAMERA
-                  </button>
+                    <div className="playback-video-pane">
+                      <span className="playback-pane-label">VIDEO PLAYBACK</span>
+                      <video
+                        key={pendingTrial.video_id}
+                        style={{
+                          transform: `${cameraMirrored ? "scaleX(-1) " : ""}${cameraFlipped ? "rotate(90deg)" : ""}`.trim() || "none",
+                        }}
+                        controls
+                        preload="metadata"
+                        src="/backend/pending-trial/video"
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="camera-viewport">
+                    {devices?.camera_connected && !devices.mock ? (
+                      <img
+                        src={`/backend/camera/frame?t=${previewTick}`}
+                        alt={running ? "实验录像实时画面" : "摄像机空闲实时预览"}
+                        style={{
+                          transform: `${cameraMirrored ? "scaleX(-1) " : ""}${cameraFlipped ? "rotate(90deg)" : ""}`.trim() || "none",
+                        }}
+                      />
+                    ) : (
+                      <div className="camera-empty">
+                        <span>◉</span>
+                        <p>
+                          {devices?.mock ? "SIMULATION MODE" : "CAMERA OFFLINE"}
+                        </p>
+                        <small>
+                          {devices?.mock
+                            ? "真实设备连接后显示实时画面"
+                            : "连接 XIAO ESP32S3 后显示实时画面"}
+                        </small>
+                      </div>
+                    )}
+                  </div>
                 )}
               </section>
             </>
@@ -1816,6 +2239,52 @@ export default function Home() {
                 )}
               </section>
             </>
+          ) : manageTab === "positions" ? (
+            <section className="panel p-4">
+              <div className="section-heading">
+                <h2>Shared Position Map</h2>
+              </div>
+              {activePositionImage?.image ? (
+                <div className="grid gap-3">
+                  <div className="relative overflow-hidden rounded-xl border border-zinc-200 bg-zinc-100">
+                    <img
+                      src={activePositionImage.image}
+                      alt="Shared stimulation position map"
+                      className="block h-auto w-full"
+                    />
+                    {positions
+                      .filter(
+                        (position) =>
+                          position.image_id === activePositionImage.image_id &&
+                          position.mark,
+                      )
+                      .map((position) => (
+                        <span
+                          key={position.position_id}
+                          className="absolute -translate-x-1/2 -translate-y-1/2"
+                          style={{
+                            left: `${(position.mark?.x ?? 0) * 100}%`,
+                            top: `${(position.mark?.y ?? 0) * 100}%`,
+                          }}
+                        >
+                          <i className="block size-4 rounded-full border-2 border-white bg-red-500 shadow" />
+                          <b className="absolute left-1/2 top-full mt-1 -translate-x-1/2 rounded bg-zinc-950 px-1.5 py-1 text-[10px] leading-none text-white shadow">
+                            {position.code}
+                          </b>
+                        </span>
+                      ))}
+                  </div>
+                  <small className="text-zinc-500">
+                    同一图片上的所有 Position marks 会同时显示。
+                  </small>
+                </div>
+              ) : (
+                <EmptyState
+                  title="还没有位置图片"
+                  description="新建 Position 并上传图片后，会在这里显示所有标记。"
+                />
+              )}
+            </section>
           ) : null}
         </aside>
 
@@ -1847,62 +2316,138 @@ export default function Home() {
                       !ready ||
                       running ||
                       !runExperimentId ||
-                      !form.subject_id.trim()
+                      !form.subject_id.trim() ||
+                      !form.position_id ||
+                      !form.position_2_id ||
+                      form.position_id === form.position_2_id ||
+                      !runPositionPreview
                     }
                   >
                     <span>{running ? "●" : "▶"}</span>
                     {running ? "TRIAL IN PROGRESS" : "START TRIAL"}
                   </Button>
                 )}
-                <section className="panel run-panel">
-                  <div className="run-summary">
-                    <div>
-                      <p>CURRENT RUN</p>
-                      <h2>
-                        {running
-                          ? `Trial ${task.result?.trial_no ?? "in progress"}`
-                          : task.status === "IDLE"
-                            ? "Standing by"
-                            : task.status}
-                      </h2>
-                    </div>
-                    <div className={`run-badge ${task.status.toLowerCase()}`}>
-                      {task.status}
-                    </div>
-                  </div>
-                  <div className="progress-track">
-                    <span
-                      className={
-                        running
-                          ? "moving"
-                          : task.status === "COMPLETED"
-                            ? "complete"
-                            : ""
+                <section className="panel run-position-panel">
+                  <div className="run-position-fields">
+                    <Field label="POSITION 1" hint="两个位置必须不同。">
+                      <Select
+                        value={form.position_id}
+                        onChange={(event) => {
+                          const nextId = event.target.value;
+                          const nextPosition = positions.find(
+                            (position) =>
+                              String(position.position_id) === nextId,
+                          );
+                          const secondPosition = positions.find(
+                            (position) =>
+                              String(position.position_id) ===
+                              form.position_2_id,
+                          );
+                          setForm((current) => ({
+                            ...current,
+                            position_id: nextId,
+                            position_2_id:
+                              secondPosition &&
+                              secondPosition.image_id ===
+                                nextPosition?.image_id &&
+                              secondPosition.position_id !==
+                                nextPosition?.position_id
+                                ? current.position_2_id
+                                : "",
+                          }));
+                        }}
+                        required
+                      >
+                        <option value="">Select a marked position…</option>
+                        {positions.map((position) => (
+                          <option
+                            key={position.position_id}
+                            value={position.position_id}
+                            disabled={
+                              !position.image_id ||
+                              !position.mark ||
+                              String(position.position_id) ===
+                                form.position_2_id
+                            }
+                          >
+                            {position.code}
+                            {position.description
+                              ? ` · ${position.description}`
+                              : ""}
+                          </option>
+                        ))}
+                      </Select>
+                    </Field>
+                    <Field
+                      label="POSITION 2"
+                      hint={
+                        positions.length
+                          ? "保存时按顺序拼接 code。"
+                          : "请先在 Manage > Positions 中创建位置。"
                       }
-                    />
+                    >
+                      <Select
+                        value={form.position_2_id}
+                        onChange={(event) =>
+                          setField("position_2_id", event.target.value)
+                        }
+                        required
+                      >
+                        <option value="">Select a second position…</option>
+                        {positions.map((position) => (
+                          <option
+                            key={position.position_id}
+                            value={position.position_id}
+                            disabled={
+                              !position.image_id ||
+                              !position.mark ||
+                              String(position.position_id) ===
+                                form.position_id ||
+                              position.image_id !== runPositionOne?.image_id
+                            }
+                          >
+                            {position.code}
+                            {position.description
+                              ? ` · ${position.description}`
+                              : ""}
+                          </option>
+                        ))}
+                      </Select>
+                    </Field>
                   </div>
-                  <div
-                    className="log-window"
-                    ref={logWindowRef}
-                    role="log"
-                    aria-live="polite"
-                  >
-                    {task.logs.length === 0 ? (
-                      <p className="empty-log">
-                        System messages will appear here.
+                  {runPositionPreview?.image ? (
+                    <div className="run-position-preview">
+                      <p>
+                        POSITION PREVIEW · {runPositionOne?.code} +{" "}
+                        {runPositionTwo?.code}
                       </p>
-                    ) : (
-                      task.logs.map((log, index) => (
-                        <div
-                          className="log-line"
-                          key={`${log.timestamp}-${index}`}
-                        >
-                          <time>{log.timestamp.slice(11, 19)}</time>
-                          <span>{log.message}</span>
-                        </div>
-                      ))
-                    )}
-                  </div>
+                      <div>
+                        <img
+                          src={runPositionPreview.image}
+                          alt="Selected stimulation positions"
+                        />
+                        {[runPositionOne, runPositionTwo].map(
+                          (position) =>
+                            position?.mark && (
+                              <span
+                                key={position.position_id}
+                                style={{
+                                  left: `${position.mark.x * 100}%`,
+                                  top: `${position.mark.y * 100}%`,
+                                }}
+                              >
+                                <i />
+                                <b>{position.code}</b>
+                              </span>
+                            ),
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="run-position-placeholder">
+                      选择同一图片上的两个标记位置后显示预览
+                    </div>
+                  )}
                 </section>
               </div>
             </>
@@ -2046,16 +2591,54 @@ export default function Home() {
                               </div>
                             </td>
                             <td>
-                              <input
+                              <select
                                 aria-label="Position"
-                                value={rowEdit.stimulation_position}
+                                value={rowEdit.stimulation_position_id}
                                 onChange={(e) =>
                                   setRowField(
-                                    "stimulation_position",
+                                    "stimulation_position_id",
                                     e.target.value,
                                   )
                                 }
-                              />
+                              >
+                                <option value="">Select…</option>
+                                {positions.map((position) => (
+                                  <option
+                                    key={position.position_id}
+                                    value={position.position_id}
+                                    disabled={
+                                      String(position.position_id) ===
+                                      rowEdit.stimulation_position_2_id
+                                    }
+                                  >
+                                    {position.code}
+                                  </option>
+                                ))}
+                              </select>
+                              <select
+                                aria-label="Second position"
+                                value={rowEdit.stimulation_position_2_id}
+                                onChange={(e) =>
+                                  setRowField(
+                                    "stimulation_position_2_id",
+                                    e.target.value,
+                                  )
+                                }
+                              >
+                                <option value="">Select second…</option>
+                                {positions.map((position) => (
+                                  <option
+                                    key={position.position_id}
+                                    value={position.position_id}
+                                    disabled={
+                                      String(position.position_id) ===
+                                      rowEdit.stimulation_position_id
+                                    }
+                                  >
+                                    {position.code}
+                                  </option>
+                                ))}
+                              </select>
                             </td>
                             <td>
                               <input
@@ -2261,23 +2844,6 @@ export default function Home() {
                   </table>
                 </div>
 
-                {selected && (
-                  <div className="management-video">
-                    <div>
-                      <span>PLAYBACK</span>
-                      <strong>
-                        {selected.subject_id} · Trial {selected.trial_no}
-                      </strong>
-                    </div>
-                    <video
-                      key={selected.trial_id}
-                      controls
-                      preload="metadata"
-                      src={`/backend/trials/${selected.trial_id}/video`}
-                    />
-                  </div>
-                )}
-
                 <div className={`annotation-drawer ${selected ? "open" : ""}`}>
                   {selected ? (
                     <>
@@ -2433,7 +2999,7 @@ export default function Home() {
                 </div>
               </section>
             </>
-          ) : (
+          ) : manageTab === "subjects" ? (
             <section className="panel history-panel subject-records-panel">
               <div className="history-header">
                 <div className="section-heading">
@@ -2550,13 +3116,147 @@ export default function Home() {
                 </table>
               </div>
             </section>
+          ) : (
+            <section className="panel history-panel subject-records-panel">
+              <div className="history-header">
+                <div className="section-heading">
+                  <h2>Stimulation Positions</h2>
+                </div>
+                <Button className="min-h-9 px-3 text-xs" onClick={newPosition}>
+                  <PlusIcon className="size-4" />
+                  新建 Position
+                </Button>
+              </div>
+              <div className="grid gap-4 p-4 sm:grid-cols-2 xl:grid-cols-3">
+                {visiblePositions.map((position) => (
+                  <article
+                    key={position.position_id}
+                    className={`cursor-pointer overflow-hidden rounded-xl border bg-white ${activePositionImage?.image_id === position.image_id ? "border-zinc-950 ring-2 ring-zinc-200" : "border-zinc-200"}`}
+                    onClick={() => setSelectedPositionImageId(position.image_id)}
+                  >
+                    {position.image ? (
+                      <div className="flex h-48 items-center justify-center bg-zinc-100">
+                        <div className="relative w-fit max-w-full">
+                          <img
+                            src={position.image}
+                            alt={`Stimulation position ${position.code}`}
+                            className="block max-h-48 max-w-full"
+                          />
+                          {position.mark && (
+                            <span
+                              className="absolute size-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-red-500 shadow"
+                              style={{
+                                left: `${position.mark.x * 100}%`,
+                                top: `${position.mark.y * 100}%`,
+                              }}
+                            />
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="grid h-48 place-items-center bg-zinc-100 text-sm text-zinc-400">
+                        No image
+                      </div>
+                    )}
+                    <div className="grid gap-3 p-4">
+                      <div>
+                        <Badge tone="info">{position.code}</Badge>
+                        <p className="mt-2 text-sm text-zinc-600">
+                          {position.description || "No description"}
+                        </p>
+                      </div>
+                      <small className="text-zinc-500">
+                        ID {position.position_id} · {position.trial_count} trials
+                      </small>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="secondary"
+                          className="flex-1"
+                          onClick={() => editPosition(position)}
+                          disabled={running}
+                        >
+                          编辑
+                        </Button>
+                        <Button
+                          variant="danger"
+                          className="flex-1"
+                          onClick={() => void deletePosition(position)}
+                          disabled={
+                            running ||
+                            position.trial_count > 0 ||
+                            positionDeleting === position.position_id
+                          }
+                        >
+                          {positionDeleting === position.position_id ? "…" : "删除"}
+                        </Button>
+                      </div>
+                      {position.trial_count > 0 && (
+                        <small className="text-zinc-500">已被 Trial 使用，不能删除。</small>
+                      )}
+                    </div>
+                  </article>
+                ))}
+                {visiblePositions.length === 0 && (
+                  <EmptyState
+                    title={positions.length === 0 ? "还没有 Position" : "没有匹配的 Position"}
+                    description="创建并标记刺激位置后，才能开始实验。"
+                  />
+                )}
+              </div>
+            </section>
           )}
         </section>
       </section>
-      <footer>
-        <span>EXP. RECORDER / LOCAL CONTROL PLANE</span>
-        <span>SQLite · SCPI · USB SERIAL</span>
-      </footer>
+      {view === "execute" && (
+        <section className="panel run-panel run-footer-panel">
+          <div className="run-summary">
+            <div>
+              <p>CURRENT RUN</p>
+              <h2>
+                {running
+                  ? `Trial ${task.result?.trial_no ?? "in progress"}`
+                  : task.status === "IDLE"
+                    ? "Standing by"
+                    : task.status}
+              </h2>
+            </div>
+            <div className={`run-badge ${task.status.toLowerCase()}`}>
+              {task.status}
+            </div>
+          </div>
+          <div className="progress-track">
+            <span
+              className={
+                running
+                  ? "moving"
+                  : task.status === "COMPLETED"
+                    ? "complete"
+                    : ""
+              }
+            />
+          </div>
+          <div
+            className="log-window"
+            ref={logWindowRef}
+            role="log"
+            aria-live="polite"
+          >
+            {task.logs.length === 0 ? (
+              <p className="empty-log">System messages will appear here.</p>
+            ) : (
+              task.logs.map((log, index) => (
+                <div
+                  className="log-line"
+                  key={`${log.timestamp}-${index}`}
+                >
+                  <time>{log.timestamp.slice(11, 19)}</time>
+                  <span>{log.message}</span>
+                </div>
+              ))
+            )}
+          </div>
+        </section>
+      )}
     </AppShell>
   );
 }

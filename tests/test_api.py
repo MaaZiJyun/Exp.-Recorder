@@ -5,7 +5,7 @@ import time
 import unittest
 from pathlib import Path
 
-from src.api.server import ExperimentController, TrialRequest
+from src.api.server import AnnotationRequest, ExperimentController, TrialRequest
 
 
 class TestExperimentController(unittest.TestCase):
@@ -25,11 +25,21 @@ class TestExperimentController(unittest.TestCase):
         self.assertTrue(devices["sdg_connected"])
         self.assertTrue(devices["camera_connected"])
         experiment_id = self.controller.db.insert_experiment("Web API experiment")
+        self.controller.db.upsert_subject("WEB01")
+        image = "data:image/png;base64,AA=="
+        position_id = self.controller.db.create_stimulation_position(
+            "H1", "Head marker", image, {"x": 0.2, "y": 0.3}
+        )
+        position_2_id = self.controller.db.create_stimulation_position(
+            "A1", "Anterior marker", image, {"x": 0.7, "y": 0.6}
+        )
 
         task = self.controller.start_trial(
             TrialRequest(
                 experiment_id=experiment_id,
                 subject_id="WEB01",
+                position_id=position_id,
+                position_2_id=position_2_id,
                 waveform="PULSE",
                 high_level_v=4.0,
                 low_level_v=1.0,
@@ -54,7 +64,11 @@ class TestExperimentController(unittest.TestCase):
         self.assertEqual(state["result"]["stimulation_high_level_v"], 4.0)
         self.assertEqual(state["result"]["stimulation_low_level_v"], 1.0)
         self.assertEqual(state["result"]["stimulation_duty_cycle_pct"], 30.0)
+        self.assertEqual(state["result"]["stimulation_position_id"], position_id)
+        self.assertEqual(state["result"]["stimulation_position_2_id"], position_2_id)
+        self.assertEqual(state["result"]["stimulation_position"], "H1A1")
         self.assertTrue(state["logs"])
+        self.controller.commit_pending_trial(AnnotationRequest())
 
         cleared = self.controller.clear_data()
         self.assertEqual(cleared["trials_deleted"], 1)
@@ -62,6 +76,47 @@ class TestExperimentController(unittest.TestCase):
         self.assertEqual(cleared["experiments_deleted"], 1)
         self.assertEqual(self.controller.db.list_trials(), [])
         self.assertEqual(self.controller.current_task()["status"], "IDLE")
+
+    def test_trial_requires_registered_stimulation_position(self):
+        self.controller.connect_devices()
+        self.controller.db.upsert_subject("MARK01")
+        experiment_id = self.controller.db.insert_experiment("Marked position")
+        position_id = self.controller.db.create_stimulation_position("A1")
+        with self.assertRaisesRegex(ValueError, "Stimulation Position"):
+            self.controller.start_trial(
+                TrialRequest(
+                    experiment_id=experiment_id,
+                    subject_id="MARK01",
+                    position_id=999,
+                    position_2_id=position_id,
+                )
+            )
+
+        with self.assertRaisesRegex(ValueError, "必须不同"):
+            self.controller.start_trial(
+                TrialRequest(
+                    experiment_id=experiment_id,
+                    subject_id="MARK01",
+                    position_id=position_id,
+                    position_2_id=position_id,
+                )
+            )
+
+        first = self.controller.db.create_stimulation_position(
+            "B1", image="data:image/png;base64,AA==", mark={"x": 0.1, "y": 0.2}
+        )
+        second = self.controller.db.create_stimulation_position(
+            "C1", image="data:image/png;base64,AQ==", mark={"x": 0.3, "y": 0.4}
+        )
+        with self.assertRaisesRegex(ValueError, "同一张图片"):
+            self.controller.start_trial(
+                TrialRequest(
+                    experiment_id=experiment_id,
+                    subject_id="MARK01",
+                    position_id=first,
+                    position_2_id=second,
+                )
+            )
 
     def test_update_and_delete_single_trial(self):
         self.controller.db.upsert_subject("EDIT01")

@@ -151,10 +151,19 @@ data/videos/{SubjectID}_T{TrialNo:03d}_{Timestamp}.webm
 B07_T003_20260828_143216.webm
 ```
 
-### 5.2 SQLite 字段规范 (表 `trials`)
+### 5.2 刺激位置（表 `stimulation_positions`）
+
+在 Web 控制台的 **Manage > Positions** 中预先标记刺激位置。每条记录包含
+`position_id`、唯一 `code`（例如 `A1`）、`description`、共享 `image_id` 和
+图片内的 `mark` 坐标。图片按内容去重，同一图片只在数据库保存一次；管理页面
+左侧会在共享底图上同时显示所有关联 Position 的 marks。开始实验时
+必须从这些记录中选择两个不同的位置；Trial 同时保存两个位置外键，并按选择
+顺序将 code 直接拼接为快照（例如 `H1` + `A1` 保存为 `H1A1`）。
+
+### 5.3 SQLite 字段规范（表 `trials`）
 - **Subject**: `subject_id`, `body_length_cm`, `body_weight_g`
 - **Trial Metadata**: `trial_no`, `video_id`, `experiment_timestamp`, `video_file`, `status`
-- **Stimulus Parameters**: `stimulation_time`, `stimulation_position`, `stimulation_waveform`, `stimulation_high_level_v`, `stimulation_low_level_v`, `stimulation_duty_cycle_pct`, `stimulation_voltage_v`, `stimulation_frequency_hz`, `stimulation_duration_s`, `stimulation_count`, `stimulation_interval_s`
+- **Stimulus Parameters**: `stimulation_time`, `stimulation_position_id`, `stimulation_position_2_id`, `stimulation_position`, `stimulation_waveform`, `stimulation_high_level_v`, `stimulation_low_level_v`, `stimulation_duty_cycle_pct`, `stimulation_voltage_v`, `stimulation_frequency_hz`, `stimulation_duration_s`, `stimulation_count`, `stimulation_interval_s`
 - **Recording Durations**: `baseline_duration_s`, `post_stim_duration_s`
 - **Manual Response Annotations**: `response_latency_s`, `response_action`, `response_degree`
 

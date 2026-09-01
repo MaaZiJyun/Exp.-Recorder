@@ -39,6 +39,39 @@ class TestExpRecorder(unittest.TestCase):
         self.assertTrue(self.db.update_experiment(experiment_id, "Startle response v2", "Updated"))
         self.assertEqual(self.db.get_experiment(experiment_id)["description"], "Updated")
 
+        position_id = self.db.create_stimulation_position(
+            "A1",
+            "Anterior marker",
+            "data:image/png;base64,AA==",
+            {"x": 0.25, "y": 0.75},
+        )
+        position = self.db.get_stimulation_position(position_id)
+        self.assertEqual(position["code"], "A1")
+        self.assertEqual(position["trial_count"], 0)
+        self.assertEqual(position["mark"], {"x": 0.25, "y": 0.75})
+        self.assertTrue(
+            self.db.update_stimulation_position(
+                position_id,
+                "A2",
+                "Updated marker",
+                position["image"],
+                position["mark"],
+            )
+        )
+        position_2_id = self.db.create_stimulation_position(
+            "H1",
+            "Head marker",
+            position["image"],
+            {"x": 0.8, "y": 0.2},
+        )
+        second_position = self.db.get_stimulation_position(position_2_id)
+        self.assertEqual(second_position["image_id"], position["image_id"])
+        with self.db.get_connection() as conn:
+            self.assertEqual(
+                conn.execute("SELECT COUNT(*) FROM stimulation_position_images").fetchone()[0],
+                1,
+            )
+
         # Insert Trial
         trial_data = {
             "experiment_id": experiment_id,
@@ -48,7 +81,9 @@ class TestExpRecorder(unittest.TestCase):
             "experiment_timestamp": "2026-08-28 12:00:00",
             "video_file": "B07_T001_20260828_120000.webm",
             "stimulation_time": "2026-08-28 12:00:02.000",
-            "stimulation_position": "Head",
+            "stimulation_position_id": position_id,
+            "stimulation_position_2_id": position_2_id,
+            "stimulation_position": "A2H1",
             "stimulation_voltage_v": 2.5,
             "stimulation_frequency_hz": 100.0,
             "stimulation_duration_s": 0.2,
@@ -77,6 +112,10 @@ class TestExpRecorder(unittest.TestCase):
         self.assertEqual(trials[0]["response_latency_s"], 0.035)
         self.assertEqual(trials[0]["experiment_id"], experiment_id)
         self.assertEqual(trials[0]["experiment_title"], "Startle response v2")
+        self.assertEqual(self.db.get_stimulation_position(position_id)["trial_count"], 1)
+        self.assertEqual(self.db.get_stimulation_position(position_2_id)["trial_count"], 1)
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.delete_stimulation_position(position_id)
         self.assertEqual(len(self.db.list_trials(experiment_id=experiment_id)), 1)
         with self.assertRaises(sqlite3.IntegrityError):
             self.db.delete_experiment(experiment_id)
@@ -162,6 +201,42 @@ class TestExpRecorder(unittest.TestCase):
         self.assertIn("experiment_id", columns)
         self.assertTrue(any(row["table"] == "experiment" for row in foreign_keys))
 
+    def test_legacy_position_images_are_deduplicated_during_migration(self):
+        legacy_db = Path(self.tmp_dir.name) / "legacy-position-images.db"
+        image = "data:image/png;base64,AA=="
+        with sqlite3.connect(legacy_db) as conn:
+            conn.execute(
+                """CREATE TABLE stimulation_positions (
+                    position_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    code TEXT NOT NULL UNIQUE,
+                    description TEXT,
+                    image TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )"""
+            )
+            conn.execute(
+                "INSERT INTO stimulation_positions (code, image) VALUES ('A1', ?)",
+                (image,),
+            )
+            conn.execute(
+                "INSERT INTO stimulation_positions (code, image) VALUES ('H1', ?)",
+                (image,),
+            )
+
+        migrated = DatabaseManager(db_path=legacy_db)
+        positions = migrated.list_stimulation_positions()
+        self.assertEqual(positions[0]["image_id"], positions[1]["image_id"])
+        with migrated.get_connection() as conn:
+            self.assertEqual(
+                conn.execute("SELECT COUNT(*) FROM stimulation_position_images").fetchone()[0],
+                1,
+            )
+            self.assertEqual(
+                conn.execute(
+                    "SELECT COUNT(*) FROM stimulation_positions WHERE image IS NOT NULL"
+                ).fetchone()[0],
+                0,
+            )
     def test_trial_rejects_unknown_experiment(self):
         self.db.upsert_subject("B10")
         with self.assertRaises(sqlite3.IntegrityError):

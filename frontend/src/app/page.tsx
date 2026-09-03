@@ -69,10 +69,21 @@ type SubjectRecord = {
   mandibular_length_cm: number | null;
   gender: string | null;
   species: string | null;
-  time_since_last_experiment_h: number | null;
+  time_since_last_experiment_h: string | null;
+  time_since_last_feeding_h: string | null;
   notes: string | null;
   created_at: string;
   trial_count: number;
+  status: "正常" | "饥饿" | "疲劳";
+};
+
+type SpeciesRecord = {
+  species_id: number;
+  code: string;
+  scientific_name: string;
+  image: string | null;
+  feeding_cycle_h: number | null;
+  rest_cycle_h: number | null;
 };
 
 type StimulationPosition = {
@@ -82,6 +93,7 @@ type StimulationPosition = {
   image_id: number | null;
   image: string | null;
   mark: { x: number; y: number } | null;
+  species: string | null;
   created_at: string;
   trial_count: number;
 };
@@ -366,11 +378,15 @@ export default function Home() {
   const [experimentSaving, setExperimentSaving] = useState(false);
   const [experimentDeleting, setExperimentDeleting] = useState(false);
   const [manageTab, setManageTab] = useState<
-    "experiments" | "subjects" | "positions" | "statistics"
+    "experiments" | "subjects" | "positions" | "species" | "statistics"
   >(
     "experiments",
   );
   const [subjects, setSubjects] = useState<SubjectRecord[]>([]);
+  const [speciesRecords, setSpeciesRecords] = useState<SpeciesRecord[]>([]);
+  const [editingSpecies, setEditingSpecies] = useState(false);
+  const [speciesEditorId, setSpeciesEditorId] = useState<number | null>(null);
+  const [speciesDraft, setSpeciesDraft] = useState({ code: "", scientific_name: "", image: "", feeding_cycle_h: "", rest_cycle_h: "" });
   const [subjectQuery, setSubjectQuery] = useState("");
   const [editingSubject, setEditingSubject] = useState(false);
   const [subjectEditorId, setSubjectEditorId] = useState<string | null>(null);
@@ -394,6 +410,7 @@ export default function Home() {
     description: "",
     image: "",
     mark: null as { x: number; y: number } | null,
+    species: "",
   });
   const [subjectDraft, setSubjectDraft] = useState({
     subject_id: "",
@@ -463,6 +480,21 @@ export default function Home() {
     setSubjects(records);
     return records;
   }, []);
+  const loadSpecies = useCallback(async () => {
+    const records = await api<SpeciesRecord[]>("/species");
+    setSpeciesRecords(records);
+    return records;
+  }, []);
+  const saveSpecies = async () => {
+    if (!speciesDraft.code.trim() || !speciesDraft.scientific_name.trim()) return;
+    const record = await api<SpeciesRecord>(speciesEditorId === null ? "/species" : `/species/${speciesEditorId}`, {
+      method: speciesEditorId === null ? "POST" : "PUT",
+      body: JSON.stringify({ ...speciesDraft, image: speciesDraft.image || null, feeding_cycle_h: speciesDraft.feeding_cycle_h ? Number(speciesDraft.feeding_cycle_h) : null, rest_cycle_h: speciesDraft.rest_cycle_h ? Number(speciesDraft.rest_cycle_h) : null }),
+    });
+    setSpeciesRecords((current) => speciesEditorId === null ? [...current, record] : current.map((item) => item.species_id === record.species_id ? record : item));
+    setEditingSpecies(false);
+  };
+  const newSpecies = () => { setSpeciesEditorId(null); setSpeciesDraft({ code: "", scientific_name: "", image: "", feeding_cycle_h: "", rest_cycle_h: "" }); setEditingSpecies(true); };
 
   const loadPositions = useCallback(async () => {
     const records = await api<StimulationPosition[]>("/stimulation-positions");
@@ -520,6 +552,7 @@ export default function Home() {
           loadTrials(filterRef.current, managedExperimentRef.current),
           loadExperiments(),
           loadSubjects(),
+          loadSpecies(),
           loadPositions(),
         ]);
         setNotice({
@@ -534,7 +567,7 @@ export default function Home() {
     } catch {
       setDevices(null);
     }
-  }, [loadExperiments, loadPositions, loadSubjects, loadTrials]);
+  }, [loadExperiments, loadPositions, loadSpecies, loadSubjects, loadTrials]);
 
   useEffect(() => {
     const initialLoad = window.setTimeout(() => {
@@ -556,6 +589,7 @@ export default function Home() {
           setTrials([]);
         });
       void loadSubjects().catch(() => setSubjects([]));
+      void loadSpecies().catch(() => setSpeciesRecords([]));
       void loadPositions().catch(() => setPositions([]));
       void refresh();
       void api<Record<string, string | number>>("/config")
@@ -835,7 +869,7 @@ export default function Home() {
 
   const newPosition = () => {
     setPositionEditorId(null);
-    setPositionDraft({ code: "", description: "", image: "", mark: null });
+    setPositionDraft({ code: "", description: "", image: "", mark: null, species: "" });
     setEditingPosition(true);
   };
 
@@ -846,6 +880,7 @@ export default function Home() {
       description: position.description ?? "",
       image: position.image ?? "",
       mark: position.mark,
+      species: position.species ?? "",
     });
     setEditingPosition(true);
   };
@@ -868,6 +903,7 @@ export default function Home() {
             description: positionDraft.description.trim() || null,
             image: positionDraft.image || null,
             mark: positionDraft.mark,
+            species: positionDraft.species.trim() || null,
           }),
         },
       );
@@ -1309,12 +1345,21 @@ export default function Home() {
       position.image_id !== null &&
       records.findIndex((item) => item.image_id === position.image_id) === index,
   );
+  const speciesImageOptions = speciesRecords.filter(
+    (species) => species.image && (!positionDraft.species || species.code === positionDraft.species),
+  );
   const activePositionImage =
     positionImages.find(
       (position) => position.image_id === selectedPositionImageId,
     ) ?? positionImages[0] ?? null;
   const runPositionOne = positions.find(
     (position) => String(position.position_id) === form.position_id,
+  );
+  const selectedSubjectSpecies = subjects.find(
+    (subject) => subject.subject_id === form.subject_id,
+  )?.species;
+  const runPositions = positions.filter(
+    (position) => !position.species || position.species === selectedSubjectSpecies,
   );
   const runPositionTwo = positions.find(
     (position) => String(position.position_id) === form.position_2_id,
@@ -1327,6 +1372,17 @@ export default function Home() {
   return (
     <AppShell
       workspace={view}
+      manageSection={manageTab}
+      onManageSectionChange={(section) => {
+        setView("manage");
+        // Species are currently maintained as the species field on Subjects.
+        if (section === "statistics") {
+          const experimentId = managedExperimentId ?? experiments[0]?.experiment_id ?? null;
+          setStatisticsExperimentId(experimentId);
+          if (experimentId) void loadSubjectPositionCombinationStatistics(experimentId).catch(() => setSubjectPositionCombinationStatistics([]));
+        }
+        setManageTab((section === "species" ? "subjects" : section) as typeof manageTab);
+      }}
       onWorkspaceChange={(workspace) => {
         setView(workspace);
         if (workspace === "execute") setSelected(null);
@@ -1398,6 +1454,10 @@ export default function Home() {
                 onChange={(event) => {
                   const subjectId = event.target.value;
                   setField("subject_id", subjectId);
+                  const selectedSubject = subjects.find((subject) => subject.subject_id === subjectId);
+                  if (selectedSubject && selectedSubject.status !== "正常") {
+                    setNotice({ kind: "error", text: `警告：${selectedSubject.subject_id} 当前状态为${selectedSubject.status}。` });
+                  }
                   void lookupSubject(subjectId);
                 }}
                 disabled={running}
@@ -1434,7 +1494,8 @@ export default function Home() {
         </section>
       ) : (
         <section className="flex w-full flex-col gap-3 sm:flex-row">
-          <div className="flex shrink-0 rounded-lg bg-zinc-100 p-1">
+          {/* Management sections are selected from the sidebar. */}
+          <div className="hidden">
             <button
               type="button"
               className={`rounded-md px-4 py-2 text-sm font-semibold ${manageTab === "experiments" ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-500"}`}
@@ -1512,7 +1573,9 @@ export default function Home() {
                 ? newExperiment
                 : manageTab === "subjects"
                   ? newSubject
-                  : newPosition
+                  : manageTab === "positions"
+                    ? newPosition
+                    : newSpecies
             }
             className="shrink-0"
           >
@@ -1520,8 +1583,8 @@ export default function Home() {
             {manageTab === "experiments"
               ? "新建 Experiment"
               : manageTab === "subjects"
-                ? "新建 Subject"
-                : "新建 Position"}
+              ? "新建 Subject"
+                : manageTab === "positions" ? "新建 Position" : "新建 Species"}
             </Button>
           )}
         </section>
@@ -1688,7 +1751,7 @@ export default function Home() {
               />
             </Field>
             <Field label="SPECIES">
-              <Input
+              <Select
                 value={subjectDraft.species}
                 onChange={(event) =>
                   setSubjectDraft((current) => ({
@@ -1696,8 +1759,14 @@ export default function Home() {
                     species: event.target.value,
                   }))
                 }
-                placeholder="Species"
-              />
+              >
+                <option value="">选择已注册物种…</option>
+                {speciesRecords.map((species) => (
+                  <option key={species.species_id} value={species.code}>
+                    {species.code} · {species.scientific_name}
+                  </option>
+                ))}
+              </Select>
             </Field>
             <Field
               label="TIME SINCE LAST EXPERIMENT (h)"
@@ -1775,20 +1844,30 @@ export default function Home() {
               placeholder="位置说明、解剖标记或操作备注…"
             />
           </Field>
-          <Field label="IMAGE" hint="PNG、JPEG、WebP 或 GIF，最大 2 MB。">
-            {positionImages.length > 0 && (
+          <Field label="SPECIES" hint="该位置及照片仅用于对应物种；留空表示通用。">
+            <Select
+              value={positionDraft.species}
+              onChange={(event) =>
+                setPositionDraft((current) => ({
+                  ...current,
+                  species: event.target.value,
+                  image: speciesRecords.find((species) => species.code === event.target.value)?.image ?? "",
+                  mark: null,
+                }))
+              }
+            >
+              <option value="">通用位置</option>
+              {Array.from(new Set(subjects.map((subject) => subject.species).filter(Boolean) as string[])).map((species) => (
+                <option key={species} value={species}>{species}</option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="IMAGE" hint="图片由所选 Species 自动提供。" className="hidden">
+            {speciesImageOptions.length > 0 && (
               <Select
-                value={
-                  positions.find(
-                    (position) =>
-                      position.image === positionDraft.image && position.image_id,
-                  )?.image_id ?? ""
-                }
+                value={speciesImageOptions.find((species) => species.image === positionDraft.image)?.species_id?.toString() ?? ""}
                 onChange={(event) => {
-                  const selectedImage = positionImages.find(
-                    (position) =>
-                      String(position.image_id) === event.target.value,
-                  );
+                  const selectedImage = speciesImageOptions.find((species) => String(species.species_id) === event.target.value);
                   setPositionDraft((current) => ({
                     ...current,
                     image: selectedImage?.image ?? "",
@@ -1796,10 +1875,10 @@ export default function Home() {
                   }));
                 }}
               >
-                <option value="">选择已有图片…</option>
-                {positionImages.map((position) => (
-                  <option key={position.image_id} value={position.image_id ?? ""}>
-                    Image {position.image_id} · {position.code}
+                <option value="">选择物种图片…</option>
+                {speciesImageOptions.map((species) => (
+                  <option key={species.species_id} value={species.species_id}>
+                    {species.code} · {species.scientific_name}
                   </option>
                 ))}
               </Select>
@@ -1861,6 +1940,17 @@ export default function Home() {
               {positionSaving ? "保存中…" : "保存 Position"}
             </Button>
           </div>
+        </div>
+      </Dialog>
+
+      <Dialog open={editingSpecies} title={speciesEditorId === null ? "New Species" : "Edit Species"} closeLabel="关闭" onClose={() => setEditingSpecies(false)}>
+        <div className="grid gap-4">
+          <Field label="CODE"><Input value={speciesDraft.code} onChange={(event) => setSpeciesDraft((current) => ({ ...current, code: event.target.value }))} /></Field>
+          <Field label="SCIENTIFIC NAME"><Input value={speciesDraft.scientific_name} onChange={(event) => setSpeciesDraft((current) => ({ ...current, scientific_name: event.target.value }))} /></Field>
+          <Field label="FEEDING CYCLE (h)"><Input type="number" min="0" value={speciesDraft.feeding_cycle_h} onChange={(event) => setSpeciesDraft((current) => ({ ...current, feeding_cycle_h: event.target.value }))} /></Field>
+          <Field label="REST CYCLE (h)"><Input type="number" min="0" value={speciesDraft.rest_cycle_h} onChange={(event) => setSpeciesDraft((current) => ({ ...current, rest_cycle_h: event.target.value }))} /></Field>
+          <Field label="IMAGE"><Input type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={(event) => { const file = event.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = () => setSpeciesDraft((current) => ({ ...current, image: typeof reader.result === "string" ? reader.result : "" })); reader.readAsDataURL(file); }} /></Field>
+          <div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => setEditingSpecies(false)}>取消</Button><Button onClick={() => void saveSpecies()}>保存 Species</Button></div>
         </div>
       </Dialog>
 
@@ -2031,7 +2121,7 @@ export default function Home() {
       </Dialog>
 
       <section
-        className={`dashboard-grid ${view === "execute" ? "execute-layout" : "manage-layout"} ${view === "manage" && (manageTab === "subjects" || manageTab === "statistics") ? "single-column-manage-layout" : ""}`}
+        className={`dashboard-grid ${view === "execute" ? "execute-layout" : "manage-layout"} ${view === "manage" && manageTab === "statistics" ? "single-column-manage-layout" : ""}`}
       >
         <aside className="left-column">
           {view === "execute" ? (
@@ -2295,6 +2385,13 @@ export default function Home() {
                 )}
               </section>
             </>
+          ) : manageTab === "subjects" ? (
+            <section className="panel history-panel subject-records-panel">
+              <div className="history-header"><div className="section-heading"><h2>Species</h2></div><Button className="min-h-9 px-3 text-xs" onClick={newSpecies}><PlusIcon className="size-4" />新建 Species</Button></div>
+              <div className="table-wrap"><table><thead><tr><th>CODE</th><th>SCIENTIFIC NAME</th><th>ACTIONS</th></tr></thead><tbody>
+                {speciesRecords.map((species) => <tr key={species.species_id}><td>{species.code}</td><td>{species.scientific_name}</td><td><button type="button" onClick={() => { setSpeciesEditorId(species.species_id); setSpeciesDraft({ code: species.code, scientific_name: species.scientific_name, image: species.image ?? "", feeding_cycle_h: species.feeding_cycle_h?.toString() ?? "", rest_cycle_h: species.rest_cycle_h?.toString() ?? "" }); setEditingSpecies(true); }}>编辑</button> <button type="button" onClick={() => void api(`/species/${species.species_id}`, { method: "DELETE" }).then(() => loadSpecies())}>删除</button></td></tr>)}
+              </tbody></table></div>
+            </section>
           ) : manageTab === "positions" ? (
             <section className="panel p-4">
               <div className="section-heading">
@@ -2415,7 +2512,7 @@ export default function Home() {
                         required
                       >
                         <option value="">Select a marked position…</option>
-                        {positions.map((position) => (
+                        {runPositions.map((position) => (
                           <option
                             key={position.position_id}
                             value={position.position_id}
@@ -2450,7 +2547,7 @@ export default function Home() {
                         required
                       >
                         <option value="">Select a second position…</option>
-                        {positions.map((position) => (
+                        {runPositions.map((position) => (
                           <option
                             key={position.position_id}
                             value={position.position_id}
@@ -3075,10 +3172,7 @@ export default function Home() {
                       <th>WIDTH</th>
                       <th>MANDIBLE</th>
                       <th>WEIGHT</th>
-                      <th>GENDER</th>
                       <th>SPECIES</th>
-                      <th>SINCE LAST</th>
-                      <th>NOTES</th>
                       <th>TRIALS</th>
                       <th>CREATED</th>
                       <th>ACTIONS</th>
@@ -3086,7 +3180,7 @@ export default function Home() {
                   </thead>
                   <tbody>
                     {visibleSubjects.map((subject) => (
-                      <tr key={subject.subject_id}>
+                      <tr key={subject.subject_id} className={subject.status !== "正常" ? "text-zinc-400" : ""}>
                         <td>
                           <strong>{subject.subject_id}</strong>
                         </td>
@@ -3114,25 +3208,13 @@ export default function Home() {
                             {subject.body_weight_g !== null ? "g" : ""}
                           </small>
                         </td>
-                        <td>{subject.gender || "—"}</td>
                         <td>{subject.species || "—"}</td>
-                        <td>
-                          {subject.time_since_last_experiment_h ?? "—"}
-                          <small>
-                            {subject.time_since_last_experiment_h !== null
-                              ? "h"
-                              : ""}
-                          </small>
-                        </td>
-                        <td className="subject-notes">
-                          {subject.notes || (
-                            <span className="muted">No notes</span>
-                          )}
-                        </td>
                         <td>{subject.trial_count}</td>
                         <td>{subject.created_at?.slice(0, 16) ?? "—"}</td>
                         <td>
                           <div className="row-actions">
+                            <button onClick={() => void api(`/subjects/${subject.subject_id}/feed`, { method: "POST" }).then(() => loadSubjects())} disabled={running}>Feed</button>
+                            <button onClick={() => void api(`/subjects/${subject.subject_id}/test`, { method: "POST" }).then(() => loadSubjects())} disabled={running}>Test</button>
                             <button
                               onClick={() => editSubject(subject)}
                               disabled={running}
@@ -3260,7 +3342,7 @@ export default function Home() {
                 )}
               </div>
             </section>
-          ) : (
+          ) : manageTab === "statistics" ? (
             <section className="panel statistics-panel">
               <div className="history-header">
                 <div>
@@ -3375,7 +3457,7 @@ export default function Home() {
                 </div>
               )}
             </section>
-          )}
+          ) : null}
         </section>
       </section>
       {view === "execute" && (

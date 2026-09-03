@@ -3,6 +3,7 @@
 import hashlib
 import json
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from src.config import DB_PATH
@@ -55,6 +56,7 @@ class DatabaseManager:
                 "time_since_last_feeding_h": "REAL",
                 "time_since_last_experiment_h": "REAL",
                 "recent_fighting": "TEXT",
+                "time_since_last_feeding_h": "TEXT",
             }
             for column, definition in subject_migrations.items():
                 if column not in existing_subject_columns:
@@ -66,7 +68,12 @@ class DatabaseManager:
             position_migrations = {
                 "image_id": "INTEGER REFERENCES stimulation_position_images(image_id)",
                 "mark": "TEXT",
+                "species": "TEXT",
             }
+            existing_species_columns = {row["name"] for row in conn.execute("PRAGMA table_info(species)").fetchall()}
+            for column, definition in {"feeding_cycle_h": "REAL", "rest_cycle_h": "REAL"}.items():
+                if column not in existing_species_columns:
+                    conn.execute(f"ALTER TABLE species ADD COLUMN {column} {definition}")
             for column, definition in position_migrations.items():
                 if column not in existing_position_columns:
                     conn.execute(
@@ -136,13 +143,14 @@ class DatabaseManager:
         description: Optional[str] = None,
         image: Optional[str] = None,
         mark: Optional[Dict[str, float]] = None,
+        species: Optional[str] = None,
     ) -> int:
         with self.get_connection() as conn:
             image_id = self._resolve_position_image(conn, image)
             cursor = conn.execute(
                 """INSERT INTO stimulation_positions
-                (code, description, image_id, mark) VALUES (?, ?, ?, ?)""",
-                (code, description, image_id, self._mark_json(mark)),
+                (code, description, image_id, mark, species) VALUES (?, ?, ?, ?, ?)""",
+                (code, description, image_id, self._mark_json(mark), species),
             )
             conn.commit()
             return cursor.lastrowid
@@ -151,7 +159,7 @@ class DatabaseManager:
         with self.get_connection() as conn:
             row = conn.execute(
                 """SELECT p.position_id, p.code, p.description, p.image_id,
-                    p.mark, p.created_at, i.image, (
+                    p.mark, p.species, p.created_at, i.image, (
                     SELECT COUNT(*) FROM trials t
                     WHERE t.stimulation_position_id = p.position_id
                        OR t.stimulation_position_2_id = p.position_id
@@ -168,7 +176,7 @@ class DatabaseManager:
         with self.get_connection() as conn:
             rows = conn.execute(
                 """SELECT p.position_id, p.code, p.description, p.image_id,
-                    p.mark, p.created_at, i.image, (
+                    p.mark, p.species, p.created_at, i.image, (
                     SELECT COUNT(*) FROM trials t
                     WHERE t.stimulation_position_id = p.position_id
                        OR t.stimulation_position_2_id = p.position_id
@@ -214,6 +222,7 @@ class DatabaseManager:
         description: Optional[str] = None,
         image: Optional[str] = None,
         mark: Optional[Dict[str, float]] = None,
+        species: Optional[str] = None,
     ) -> bool:
         with self.get_connection() as conn:
             existing = conn.execute(
@@ -226,9 +235,9 @@ class DatabaseManager:
             image_id = self._resolve_position_image(conn, image)
             cursor = conn.execute(
                 """UPDATE stimulation_positions
-                SET code = ?, description = ?, image_id = ?, mark = ?, image = NULL
+                SET code = ?, description = ?, image_id = ?, mark = ?, species = ?, image = NULL
                 WHERE position_id = ?""",
-                (code, description, image_id, self._mark_json(mark), position_id),
+                (code, description, image_id, self._mark_json(mark), species, position_id),
             )
             if old_image_id != image_id:
                 self._remove_unused_position_image(conn, old_image_id)
@@ -349,6 +358,39 @@ class DatabaseManager:
             row = cursor.fetchone()
             return dict(row) if row else None
 
+    def list_species(self) -> List[Dict[str, Any]]:
+        with self.get_connection() as conn:
+            return [dict(row) for row in conn.execute("SELECT * FROM species ORDER BY code COLLATE NOCASE").fetchall()]
+
+    def create_species(self, code: str, scientific_name: str, image: Optional[str] = None, feeding_cycle_h: Optional[float] = None, rest_cycle_h: Optional[float] = None) -> int:
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                "INSERT INTO species (code, scientific_name, image, feeding_cycle_h, rest_cycle_h) VALUES (?, ?, ?, ?, ?)",
+                (code, scientific_name, image, feeding_cycle_h, rest_cycle_h),
+            )
+            conn.commit()
+            return cursor.lastrowid
+
+    def update_species(self, species_id: int, code: str, scientific_name: str, image: Optional[str] = None, feeding_cycle_h: Optional[float] = None, rest_cycle_h: Optional[float] = None) -> bool:
+        with self.get_connection() as conn:
+            cursor = conn.execute("UPDATE species SET code=?, scientific_name=?, image=?, feeding_cycle_h=?, rest_cycle_h=? WHERE species_id=?", (code, scientific_name, image, feeding_cycle_h, rest_cycle_h, species_id))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def touch_subject_date(self, subject_id: str, field: str) -> bool:
+        if field not in {"time_since_last_feeding_h", "time_since_last_experiment_h"}:
+            raise ValueError("Invalid subject date field")
+        with self.get_connection() as conn:
+            cursor = conn.execute(f"UPDATE subjects SET {field}=? WHERE subject_id=?", (__import__('datetime').datetime.now().isoformat(timespec='seconds'), subject_id))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def delete_species(self, species_id: int) -> bool:
+        with self.get_connection() as conn:
+            cursor = conn.execute("DELETE FROM species WHERE species_id=?", (species_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+
     def list_subjects(self) -> List[Dict[str, Any]]:
         query = """
         SELECT s.*, COUNT(t.trial_id) AS trial_count
@@ -358,7 +400,23 @@ class DatabaseManager:
         ORDER BY s.created_at DESC, s.subject_id
         """
         with self.get_connection() as conn:
-            return [dict(row) for row in conn.execute(query).fetchall()]
+            rows = [dict(row) for row in conn.execute(query).fetchall()]
+            species = {row["code"]: row for row in conn.execute("SELECT code, feeding_cycle_h, rest_cycle_h FROM species").fetchall()}
+            now = datetime.now(timezone.utc)
+            for row in rows:
+                config = species.get(row.get("species")) or {}
+                status = "正常"
+                try:
+                    feeding = datetime.fromisoformat(row["time_since_last_feeding_h"]) if row.get("time_since_last_feeding_h") else None
+                    if feeding and feeding.tzinfo is None: feeding = feeding.replace(tzinfo=timezone.utc)
+                    if feeding and config.get("feeding_cycle_h") is not None and (now - feeding).total_seconds() / 3600 > config["feeding_cycle_h"]: status = "饥饿"
+                    testing = datetime.fromisoformat(row["time_since_last_experiment_h"]) if row.get("time_since_last_experiment_h") else None
+                    if testing and testing.tzinfo is None: testing = testing.replace(tzinfo=timezone.utc)
+                    if testing and config.get("rest_cycle_h") is not None and (now - testing).total_seconds() / 3600 < config["rest_cycle_h"]: status = "疲劳"
+                except (TypeError, ValueError):
+                    pass
+                row["status"] = status
+            return rows
 
     def update_subject(
         self,

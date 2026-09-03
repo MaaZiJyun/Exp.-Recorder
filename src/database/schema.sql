@@ -1,5 +1,15 @@
 -- SQLite Database Schema for Experiment Automation System
 
+CREATE TABLE IF NOT EXISTS species (
+    species_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    scientific_name TEXT NOT NULL,
+    image TEXT,
+    feeding_cycle_h REAL,
+    rest_cycle_h REAL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS subjects (
     subject_id TEXT PRIMARY KEY,
     body_length_cm REAL,
@@ -8,8 +18,8 @@ CREATE TABLE IF NOT EXISTS subjects (
     mandibular_length_cm REAL,
     gender TEXT,
     species TEXT,
-    time_since_last_feeding_h REAL,
-    time_since_last_experiment_h REAL,
+    time_since_last_feeding_h TEXT,
+    time_since_last_experiment_h TEXT,
     recent_fighting TEXT,
     notes TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -36,8 +46,17 @@ CREATE TABLE IF NOT EXISTS stimulation_positions (
     image TEXT, -- legacy migration source; new records use image_id
     image_id INTEGER,
     mark TEXT,
+    species TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (image_id) REFERENCES stimulation_position_images (image_id)
+);
+
+CREATE TABLE IF NOT EXISTS stimulation_position_species (
+    position_id INTEGER NOT NULL,
+    species_id INTEGER NOT NULL,
+    PRIMARY KEY (position_id, species_id),
+    FOREIGN KEY (position_id) REFERENCES stimulation_positions(position_id) ON DELETE CASCADE,
+    FOREIGN KEY (species_id) REFERENCES species(species_id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS trials (

@@ -77,6 +77,14 @@ class SubjectRequest(BaseModel):
     notes: Optional[str] = Field(default=None, max_length=2000)
 
 
+class SpeciesRequest(BaseModel):
+    code: str = Field(min_length=1, max_length=80, pattern=r"^[A-Za-z0-9_-]+$")
+    scientific_name: str = Field(min_length=1, max_length=200)
+    image: Optional[str] = Field(default=None, max_length=3_000_000)
+    feeding_cycle_h: Optional[float] = Field(default=None, ge=0)
+    rest_cycle_h: Optional[float] = Field(default=None, ge=0)
+
+
 class PositionMark(BaseModel):
     x: float = Field(ge=0, le=1)
     y: float = Field(ge=0, le=1)
@@ -89,6 +97,7 @@ class StimulationPositionRequest(BaseModel):
     description: Optional[str] = Field(default=None, max_length=2000)
     image: Optional[str] = Field(default=None, max_length=3_000_000)
     mark: Optional[PositionMark] = None
+    species: Optional[str] = Field(default=None, max_length=200)
 
 
 _POSITION_IMAGE_PATTERN = re.compile(
@@ -400,6 +409,50 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
     def subjects() -> list[dict[str, Any]]:
         return controller.db.list_subjects()
 
+    @app.post("/api/subjects/{subject_id}/feed")
+    def feed_subject(subject_id: str) -> dict[str, bool]:
+        if not controller.db.touch_subject_date(subject_id, "time_since_last_feeding_h"):
+            raise HTTPException(status_code=404, detail="Subject not found")
+        return {"updated": True}
+
+    @app.post("/api/subjects/{subject_id}/test")
+    def test_subject(subject_id: str) -> dict[str, bool]:
+        if not controller.db.touch_subject_date(subject_id, "time_since_last_experiment_h"):
+            raise HTTPException(status_code=404, detail="Subject not found")
+        return {"updated": True}
+
+    @app.get("/api/species")
+    def species() -> list[dict[str, Any]]:
+        return controller.db.list_species()
+
+    @app.post("/api/species", status_code=status.HTTP_201_CREATED)
+    def create_species(request: SpeciesRequest) -> dict[str, Any]:
+        try:
+            species_id = controller.db.create_species(request.code, request.scientific_name, request.image, request.feeding_cycle_h, request.rest_cycle_h)
+        except Exception as exc:
+            if "UNIQUE constraint failed" in str(exc):
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Species code already exists") from exc
+            raise
+        return next(item for item in controller.db.list_species() if item["species_id"] == species_id)
+
+    @app.put("/api/species/{species_id}")
+    def update_species(species_id: int, request: SpeciesRequest) -> dict[str, Any]:
+        try:
+            updated = controller.db.update_species(species_id, request.code, request.scientific_name, request.image, request.feeding_cycle_h, request.rest_cycle_h)
+        except Exception as exc:
+            if "UNIQUE constraint failed" in str(exc):
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Species code already exists") from exc
+            raise
+        if not updated:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Species not found")
+        return next(item for item in controller.db.list_species() if item["species_id"] == species_id)
+
+    @app.delete("/api/species/{species_id}")
+    def delete_species(species_id: int) -> dict[str, bool]:
+        if not controller.db.delete_species(species_id):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Species not found")
+        return {"deleted": True}
+
     @app.post("/api/subjects", status_code=status.HTTP_201_CREATED)
     def create_subject(request: SubjectRequest) -> dict[str, Any]:
         if controller.db.get_subject(request.subject_id) is not None:
@@ -479,6 +532,7 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
                 request.description or None,
                 _validate_position_image(request.image),
                 _position_mark(request),
+                request.species or None,
             )
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
@@ -501,6 +555,7 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
                 request.description or None,
                 _validate_position_image(request.image),
                 _position_mark(request),
+                request.species or None,
             )
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc

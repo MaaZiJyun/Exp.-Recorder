@@ -69,10 +69,41 @@ class SDG1022XDriver:
                     inst = self._rm.open_resource(candidate)
                     inst.timeout = 3000
                     inst.write_termination = "\n"
-                    idn = inst.query("*IDN?").strip()
-                    normalized_idn = idn.upper()
-                    if "SIGLENT" not in normalized_idn or "SDG" not in normalized_idn:
-                        raise ConnectionError(f"unexpected *IDN? response: {idn!r}")
+                    inst.read_termination = "\n"
+                    inst.query_delay = 0.1
+                    # USBTMC devices can retain bytes from an interrupted query.
+                    # Clear that stale transfer before probing a newly opened handle.
+                    try:
+                        inst.clear()
+                    except Exception:
+                        pass
+                    time.sleep(0.15)
+
+                    idn = ""
+                    unexpected_responses = []
+                    for attempt in range(3):
+                        try:
+                            response = inst.query("*IDN?")
+                            # Some pyvisa-py/USBTMC combinations expose padding
+                            # NULs left in the endpoint after a short response.
+                            idn = response.replace("\x00", "").strip()
+                            normalized_idn = idn.upper()
+                            if "SIGLENT" in normalized_idn and "SDG" in normalized_idn:
+                                break
+                            unexpected_responses.append(repr(response))
+                        except Exception as query_exc:
+                            unexpected_responses.append(str(query_exc))
+                        if attempt < 2:
+                            try:
+                                inst.clear()
+                            except Exception:
+                                pass
+                            time.sleep(0.2)
+                    else:
+                        detail = "; ".join(unexpected_responses)
+                        raise ConnectionError(
+                            f"unexpected *IDN? response after 3 attempts: {detail}"
+                        )
                     self._inst = inst
                     self.resource_name = candidate
                     self._is_connected = True

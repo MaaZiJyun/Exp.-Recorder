@@ -86,6 +86,12 @@ type StimulationPosition = {
   trial_count: number;
 };
 
+type SubjectPositionCombinationStatistic = {
+  subject_id: string;
+  position_combination: string;
+  trial_count: number;
+};
+
 type RowEdit = {
   subject_id: string;
   trial_no: string;
@@ -360,7 +366,7 @@ export default function Home() {
   const [experimentSaving, setExperimentSaving] = useState(false);
   const [experimentDeleting, setExperimentDeleting] = useState(false);
   const [manageTab, setManageTab] = useState<
-    "experiments" | "subjects" | "positions"
+    "experiments" | "subjects" | "positions" | "statistics"
   >(
     "experiments",
   );
@@ -371,6 +377,10 @@ export default function Home() {
   const [subjectSaving, setSubjectSaving] = useState(false);
   const [subjectDeleting, setSubjectDeleting] = useState<string | null>(null);
   const [positions, setPositions] = useState<StimulationPosition[]>([]);
+  const [subjectPositionCombinationStatistics, setSubjectPositionCombinationStatistics] = useState<
+    SubjectPositionCombinationStatistic[]
+  >([]);
+  const [statisticsExperimentId, setStatisticsExperimentId] = useState<number | null>(null);
   const [positionQuery, setPositionQuery] = useState("");
   const [editingPosition, setEditingPosition] = useState(false);
   const [positionEditorId, setPositionEditorId] = useState<number | null>(null);
@@ -472,6 +482,14 @@ export default function Home() {
           ? current.position_2_id
           : "",
     }));
+    return records;
+  }, []);
+
+  const loadSubjectPositionCombinationStatistics = useCallback(async (experimentId: number) => {
+    const records = await api<SubjectPositionCombinationStatistic[]>(
+      `/statistics/subject-position-combinations?experiment_id=${experimentId}`,
+    );
+    setSubjectPositionCombinationStatistics(records);
     return records;
   }, []);
 
@@ -1270,6 +1288,22 @@ export default function Home() {
           .includes(normalizedPositionQuery),
       )
     : positions;
+  const statisticSubjects = Array.from(
+    new Set(
+      subjectPositionCombinationStatistics.map((item) => item.subject_id),
+    ),
+  );
+  const statisticPositionCombinations = Array.from(
+    new Set(
+      subjectPositionCombinationStatistics.map(
+        (item) => item.position_combination,
+      ),
+    ),
+  );
+  const statisticMaximum = Math.max(
+    1,
+    ...subjectPositionCombinationStatistics.map((item) => item.trial_count),
+  );
   const positionImages = positions.filter(
     (position, index, records) =>
       position.image_id !== null &&
@@ -1314,7 +1348,7 @@ export default function Home() {
     >
       {view === "execute" ? (
         <section className="flex w-full flex-col gap-4 rounded-2xl border border-zinc-200 bg-zinc-50 p-4 xl:flex-row xl:items-end xl:justify-between xl:px-5">
-          <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
+          <div className="flex items-end gap-x-6 gap-y-3">
             <div>
               <p className="mb-1 text-sm font-medium uppercase">
                 Hardware status
@@ -1340,7 +1374,7 @@ export default function Home() {
             </div>
 
             {devices?.mock && <Badge tone="warning">SIMULATION MODE</Badge>}
-            <Field label="EXPERIMENT" className="min-w-56 flex-1 sm:flex-none">
+            <Field label="EXPERIMENT" className="min-w-50 flex-1 sm:flex-none">
               <Select
                 value={runExperimentId}
                 onChange={(event) => setRunExperimentId(event.target.value)}
@@ -1358,7 +1392,7 @@ export default function Home() {
                 ))}
               </Select>
             </Field>
-            <Field label="SUBJECT" className="min-w-40 flex-1 sm:flex-none">
+            <Field label="SUBJECT" className="max-w-50 flex-1 sm:flex-none">
               <Select
                 value={form.subject_id}
                 onChange={(event) => {
@@ -1422,8 +1456,27 @@ export default function Home() {
             >
               Positions
             </button>
+            <button
+              type="button"
+              className={`rounded-md px-4 py-2 text-sm font-semibold ${manageTab === "statistics" ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-500"}`}
+              onClick={() => {
+                setManageTab("statistics");
+                const experimentId = managedExperimentId ?? experiments[0]?.experiment_id ?? null;
+                setStatisticsExperimentId(experimentId);
+                if (experimentId === null) {
+                  setSubjectPositionCombinationStatistics([]);
+                } else {
+                  void loadSubjectPositionCombinationStatistics(experimentId).catch(() =>
+                    setSubjectPositionCombinationStatistics([]),
+                  );
+                }
+              }}
+            >
+              Statistics
+            </button>
           </div>
-          <div className="relative min-w-0 flex-1">
+          {manageTab !== "statistics" && (
+            <div className="relative min-w-0 flex-1">
             <MagnifyingGlassIcon className="pointer-events-none absolute left-3 top-1/2 size-5 -translate-y-1/2 text-zinc-400" />
             <Input
               type="search"
@@ -1450,8 +1503,10 @@ export default function Home() {
               }
               className="pl-10"
             />
-          </div>
-          <Button
+            </div>
+          )}
+          {manageTab !== "statistics" && (
+            <Button
             onClick={
               manageTab === "experiments"
                 ? newExperiment
@@ -1467,7 +1522,8 @@ export default function Home() {
               : manageTab === "subjects"
                 ? "新建 Subject"
                 : "新建 Position"}
-          </Button>
+            </Button>
+          )}
         </section>
       )}
 
@@ -1975,7 +2031,7 @@ export default function Home() {
       </Dialog>
 
       <section
-        className={`dashboard-grid ${view === "execute" ? "execute-layout" : "manage-layout"} ${view === "manage" && manageTab === "subjects" ? "subjects-layout" : ""}`}
+        className={`dashboard-grid ${view === "execute" ? "execute-layout" : "manage-layout"} ${view === "manage" && (manageTab === "subjects" || manageTab === "statistics") ? "single-column-manage-layout" : ""}`}
       >
         <aside className="left-column">
           {view === "execute" ? (
@@ -3116,7 +3172,7 @@ export default function Home() {
                 </table>
               </div>
             </section>
-          ) : (
+          ) : manageTab === "positions" ? (
             <section className="panel history-panel subject-records-panel">
               <div className="history-header">
                 <div className="section-heading">
@@ -3203,6 +3259,121 @@ export default function Home() {
                   />
                 )}
               </div>
+            </section>
+          ) : (
+            <section className="panel statistics-panel">
+              <div className="history-header">
+                <div>
+                  <div className="section-heading">
+                    <span>STATISTICS</span>
+                    <h2>Trials by Subject and Position Combination</h2>
+                  </div>
+                  <p className="statistics-description">
+                    每个 Trial 按完整刺激点组合计数，例如 H1A1。
+                  </p>
+                </div>
+                <div className="statistics-controls">
+                  <label className="statistics-experiment-select">
+                    <span>EXPERIMENT</span>
+                    <Select
+                      value={statisticsExperimentId?.toString() ?? ""}
+                      onChange={(event) => {
+                        const experimentId = event.target.value ? Number(event.target.value) : null;
+                        setStatisticsExperimentId(experimentId);
+                        if (experimentId === null) {
+                          setSubjectPositionCombinationStatistics([]);
+                        } else {
+                          void loadSubjectPositionCombinationStatistics(experimentId).catch(() =>
+                            setSubjectPositionCombinationStatistics([]),
+                          );
+                        }
+                      }}
+                    >
+                      <option value="">选择 Experiment…</option>
+                      {experiments.map((experiment) => (
+                        <option key={experiment.experiment_id} value={experiment.experiment_id}>
+                          {experiment.title}
+                        </option>
+                      ))}
+                    </Select>
+                  </label>
+                  <Badge tone="info">MAX {statisticMaximum} TRIALS</Badge>
+                </div>
+              </div>
+              {statisticSubjects.length > 0 &&
+              statisticPositionCombinations.length > 0 ? (
+                <>
+                  <div className="statistics-legend">
+                    {statisticPositionCombinations.map(
+                      (combination, combinationIndex) => (
+                      <span key={combination}>
+                        <i
+                          style={{
+                            backgroundColor: `hsl(${(combinationIndex * 67) % 360} 45% 48%)`,
+                          }}
+                        />
+                        {combination}
+                      </span>
+                      ),
+                    )}
+                  </div>
+                  <div className="statistics-chart-scroll">
+                    <div
+                      className="statistics-chart"
+                      style={{
+                        minWidth: `${Math.max(
+                          720,
+                          statisticSubjects.length *
+                            Math.max(
+                              96,
+                              statisticPositionCombinations.length * 34,
+                            ),
+                        )}px`,
+                      }}
+                    >
+                      {statisticSubjects.map((subjectId) => (
+                        <div className="statistics-subject" key={subjectId}>
+                          <div className="statistics-bars">
+                            {statisticPositionCombinations.map(
+                              (combination, combinationIndex) => {
+                                const count =
+                                  subjectPositionCombinationStatistics.find(
+                                    (item) =>
+                                      item.subject_id === subjectId &&
+                                      item.position_combination === combination,
+                                  )?.trial_count ?? 0;
+                                return (
+                                  <div
+                                    className="statistics-bar-slot"
+                                    key={combination}
+                                    title={`${subjectId} · ${combination}: ${count} trials`}
+                                  >
+                                    <span>{count}</span>
+                                    <i
+                                      style={{
+                                        height: `${(count / statisticMaximum) * 100}%`,
+                                        backgroundColor: `hsl(${(combinationIndex * 67) % 360} 45% 48%)`,
+                                      }}
+                                    />
+                                  </div>
+                                );
+                              },
+                            )}
+                          </div>
+                          <strong>{subjectId}</strong>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="p-4">
+                  <EmptyState
+                    title="暂无统计数据"
+                    description="创建 Subject、Position 并完成 Trial 后，统计图会显示在这里。"
+                  />
+                </div>
+              )}
             </section>
           )}
         </section>

@@ -70,9 +70,20 @@ class TestExperimentController(unittest.TestCase):
         self.assertTrue(state["logs"])
         self.controller.commit_pending_trial(AnnotationRequest())
 
+        self.controller.db.upsert_subject("WEB02")
+        statistics = (
+            self.controller.db.list_subject_position_combination_statistics()
+        )
+        counts = {
+            (row["subject_id"], row["position_combination"]): row["trial_count"]
+            for row in statistics
+        }
+        self.assertEqual(counts[("WEB01", "H1A1")], 1)
+        self.assertEqual(counts[("WEB02", "H1A1")], 0)
+
         cleared = self.controller.clear_data()
         self.assertEqual(cleared["trials_deleted"], 1)
-        self.assertEqual(cleared["subjects_deleted"], 1)
+        self.assertEqual(cleared["subjects_deleted"], 2)
         self.assertEqual(cleared["experiments_deleted"], 1)
         self.assertEqual(self.controller.db.list_trials(), [])
         self.assertEqual(self.controller.current_task()["status"], "IDLE")

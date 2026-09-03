@@ -179,6 +179,34 @@ class DatabaseManager:
             ).fetchall()
             return [self._position_dict(row) for row in rows]
 
+    def list_subject_position_combination_statistics(
+        self, experiment_id: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        """Count trials for every Subject/position-combination pair."""
+        with self.get_connection() as conn:
+            rows = conn.execute(
+                """WITH combinations AS (
+                    SELECT DISTINCT stimulation_position AS position_combination
+                    FROM trials
+                    WHERE stimulation_position IS NOT NULL
+                      AND TRIM(stimulation_position) != ''
+                      AND (? IS NULL OR experiment_id = ?)
+                )
+                SELECT s.subject_id, c.position_combination,
+                    COUNT(DISTINCT t.trial_id) AS trial_count
+                FROM subjects s
+                CROSS JOIN combinations c
+                LEFT JOIN trials t
+                  ON t.subject_id = s.subject_id
+                 AND t.stimulation_position = c.position_combination
+                 AND (? IS NULL OR t.experiment_id = ?)
+                GROUP BY s.subject_id, c.position_combination
+                ORDER BY s.subject_id COLLATE NOCASE,
+                         c.position_combination COLLATE NOCASE""",
+                (experiment_id, experiment_id, experiment_id, experiment_id),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
     def update_stimulation_position(
         self,
         position_id: int,

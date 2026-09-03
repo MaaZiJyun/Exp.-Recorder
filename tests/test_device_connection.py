@@ -15,11 +15,22 @@ class _VisaInstrument:
         self.closed = False
         self.timeout = None
         self.write_termination = None
+        self.read_termination = None
+        self.query_delay = None
+        self.clear_count = 0
 
     def query(self, _command):
-        if isinstance(self.identity, Exception):
-            raise self.identity
-        return self.identity
+        identity = (
+            self.identity.pop(0)
+            if isinstance(self.identity, list)
+            else self.identity
+        )
+        if isinstance(identity, Exception):
+            raise identity
+        return identity
+
+    def clear(self):
+        self.clear_count += 1
 
     def close(self):
         self.closed = True
@@ -68,6 +79,23 @@ class TestDeviceConnection(unittest.TestCase):
             driver.resource_name, "USB0::0xF4EC::0x1103::SDG::INSTR"
         )
         self.assertFalse(manager.instruments[driver.resource_name].closed)
+
+    def test_sdg_clears_stale_usbtmc_response_and_retries_identity(self):
+        manager = _VisaManager()
+        resource = "USB0::0xF4EC::0x1103::SDG::INSTR"
+        manager.instruments[resource] = _VisaInstrument(
+            ["8\n\x00\x00", "\x00Siglent Technologies,SDG1022X,SERIAL,1.0\n"]
+        )
+        pyvisa = types.ModuleType("pyvisa")
+        pyvisa.ResourceManager = lambda _backend: manager
+
+        with patch.dict(sys.modules, {"pyvisa": pyvisa}):
+            driver = SDG1022XDriver()
+            self.assertTrue(driver.connect())
+
+        instrument = manager.instruments[resource]
+        self.assertEqual(instrument.read_termination, "\n")
+        self.assertGreaterEqual(instrument.clear_count, 2)
 
     def test_xiao_port_candidates_use_metadata_and_skip_bluetooth(self):
         bluetooth = _SerialPort("/dev/cu.Bluetooth-Incoming-Port", "Bluetooth")

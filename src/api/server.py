@@ -465,6 +465,12 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
     def stimulation_positions() -> list[dict[str, Any]]:
         return controller.db.list_stimulation_positions()
 
+    @app.get("/api/statistics/subject-position-combinations")
+    def subject_position_combination_statistics(
+        experiment_id: Optional[int] = Query(default=None, ge=1),
+    ) -> list[dict[str, Any]]:
+        return controller.db.list_subject_position_combination_statistics(experiment_id)
+
     @app.post("/api/stimulation-positions", status_code=status.HTTP_201_CREATED)
     def create_stimulation_position(request: StimulationPositionRequest) -> dict[str, Any]:
         try:

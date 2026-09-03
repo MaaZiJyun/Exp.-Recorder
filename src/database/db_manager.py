@@ -511,7 +511,7 @@ class DatabaseManager:
             return cursor.rowcount > 0
 
     def delete_trial(self, trial_id: int) -> bool:
-        """Delete one database row without deleting its video file."""
+        """Delete one database row; callers may clean up its video file."""
         with self.get_connection() as conn:
             cursor = conn.execute("DELETE FROM trials WHERE trial_id = ?", (trial_id,))
             conn.commit()

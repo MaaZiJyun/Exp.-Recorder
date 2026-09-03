@@ -709,9 +709,28 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
     def delete_trial(trial_id: int) -> dict[str, bool]:
         if controller.current_task()["status"] == "RUNNING":
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="实验运行中，不能删除记录。")
+        record = next(
+            (item for item in controller.db.list_trials(limit=100_000) if item["trial_id"] == trial_id),
+            None,
+        )
+        if record is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trial not found")
         deleted = controller.db.delete_trial(trial_id)
         if not deleted:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trial not found")
+        # Remove the recording only when no remaining Trial references it.
+        stored_path = Path(record.get("video_file") or "")
+        video_root = cfg.VIDEO_DIR.resolve()
+        video_path = (stored_path if stored_path.is_absolute() else video_root / stored_path.name).resolve()
+        still_referenced = any(
+            item.get("video_file") == record.get("video_file")
+            for item in controller.db.list_trials(limit=100_000)
+        )
+        if video_path.parent == video_root and not still_referenced:
+            try:
+                video_path.unlink(missing_ok=True)
+            except OSError:
+                pass
         return {"deleted": True}
 
     @app.delete("/api/data")

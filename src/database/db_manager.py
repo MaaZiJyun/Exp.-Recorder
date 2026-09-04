@@ -401,7 +401,7 @@ class DatabaseManager:
         """
         with self.get_connection() as conn:
             rows = [dict(row) for row in conn.execute(query).fetchall()]
-            species = {row["code"]: row for row in conn.execute("SELECT code, feeding_cycle_h, rest_cycle_h FROM species").fetchall()}
+            species = {row["code"]: dict(row) for row in conn.execute("SELECT code, feeding_cycle_h, rest_cycle_h FROM species").fetchall()}
             now = datetime.now(timezone.utc)
             for row in rows:
                 config = species.get(row.get("species")) or {}

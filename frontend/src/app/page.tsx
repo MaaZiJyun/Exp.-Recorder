@@ -305,7 +305,8 @@ function TrialPositionPreview({
       (position) => position.position_id === trial.stimulation_position_2_id,
     ),
   ].filter((position): position is StimulationPosition => Boolean(position));
-  const map = selectedPositions.find((position) => position.image)?.image ?? null;
+  const map =
+    selectedPositions.find((position) => position.image)?.image ?? null;
 
   if (!map) {
     return (
@@ -379,24 +380,31 @@ export default function Home() {
   const [experimentDeleting, setExperimentDeleting] = useState(false);
   const [manageTab, setManageTab] = useState<
     "experiments" | "subjects" | "positions" | "species" | "statistics"
-  >(
-    "experiments",
-  );
+  >("experiments");
   const [subjects, setSubjects] = useState<SubjectRecord[]>([]);
   const [speciesRecords, setSpeciesRecords] = useState<SpeciesRecord[]>([]);
   const [editingSpecies, setEditingSpecies] = useState(false);
   const [speciesEditorId, setSpeciesEditorId] = useState<number | null>(null);
-  const [speciesDraft, setSpeciesDraft] = useState({ code: "", scientific_name: "", image: "", feeding_cycle_h: "", rest_cycle_h: "" });
+  const [speciesDraft, setSpeciesDraft] = useState({
+    code: "",
+    scientific_name: "",
+    image: "",
+    feeding_cycle_h: "",
+    rest_cycle_h: "",
+  });
   const [subjectQuery, setSubjectQuery] = useState("");
   const [editingSubject, setEditingSubject] = useState(false);
   const [subjectEditorId, setSubjectEditorId] = useState<string | null>(null);
   const [subjectSaving, setSubjectSaving] = useState(false);
   const [subjectDeleting, setSubjectDeleting] = useState<string | null>(null);
   const [positions, setPositions] = useState<StimulationPosition[]>([]);
-  const [subjectPositionCombinationStatistics, setSubjectPositionCombinationStatistics] = useState<
-    SubjectPositionCombinationStatistic[]
-  >([]);
-  const [statisticsExperimentId, setStatisticsExperimentId] = useState<number | null>(null);
+  const [
+    subjectPositionCombinationStatistics,
+    setSubjectPositionCombinationStatistics,
+  ] = useState<SubjectPositionCombinationStatistic[]>([]);
+  const [statisticsExperimentId, setStatisticsExperimentId] = useState<
+    number | null
+  >(null);
   const [positionQuery, setPositionQuery] = useState("");
   const [editingPosition, setEditingPosition] = useState(false);
   const [positionEditorId, setPositionEditorId] = useState<number | null>(null);
@@ -485,16 +493,68 @@ export default function Home() {
     setSpeciesRecords(records);
     return records;
   }, []);
+  const subjectStatus = (subject: SubjectRecord): "正常" | "饥饿" | "疲劳" => {
+    const species = speciesRecords.find(
+      (item) => item.code === subject.species,
+    );
+    const now = Date.now();
+    const hoursSince = (value: string | null) =>
+      value ? (now - new Date(value).getTime()) / 3600000 : null;
+    const feedingHours = hoursSince(subject.time_since_last_feeding_h);
+    const testHours = hoursSince(subject.time_since_last_experiment_h);
+    if (
+      feedingHours !== null &&
+      species?.feeding_cycle_h != null &&
+      feedingHours > species.feeding_cycle_h
+    )
+      return "饥饿";
+    else if (
+      testHours !== null &&
+      species?.rest_cycle_h != null &&
+      testHours < species.rest_cycle_h
+    ) {
+      return "疲劳";
+    } else return "正常";
+  };
   const saveSpecies = async () => {
-    if (!speciesDraft.code.trim() || !speciesDraft.scientific_name.trim()) return;
-    const record = await api<SpeciesRecord>(speciesEditorId === null ? "/species" : `/species/${speciesEditorId}`, {
-      method: speciesEditorId === null ? "POST" : "PUT",
-      body: JSON.stringify({ ...speciesDraft, image: speciesDraft.image || null, feeding_cycle_h: speciesDraft.feeding_cycle_h ? Number(speciesDraft.feeding_cycle_h) : null, rest_cycle_h: speciesDraft.rest_cycle_h ? Number(speciesDraft.rest_cycle_h) : null }),
-    });
-    setSpeciesRecords((current) => speciesEditorId === null ? [...current, record] : current.map((item) => item.species_id === record.species_id ? record : item));
+    if (!speciesDraft.code.trim() || !speciesDraft.scientific_name.trim())
+      return;
+    const record = await api<SpeciesRecord>(
+      speciesEditorId === null ? "/species" : `/species/${speciesEditorId}`,
+      {
+        method: speciesEditorId === null ? "POST" : "PUT",
+        body: JSON.stringify({
+          ...speciesDraft,
+          image: speciesDraft.image || null,
+          feeding_cycle_h: speciesDraft.feeding_cycle_h
+            ? Number(speciesDraft.feeding_cycle_h)
+            : null,
+          rest_cycle_h: speciesDraft.rest_cycle_h
+            ? Number(speciesDraft.rest_cycle_h)
+            : null,
+        }),
+      },
+    );
+    setSpeciesRecords((current) =>
+      speciesEditorId === null
+        ? [...current, record]
+        : current.map((item) =>
+            item.species_id === record.species_id ? record : item,
+          ),
+    );
     setEditingSpecies(false);
   };
-  const newSpecies = () => { setSpeciesEditorId(null); setSpeciesDraft({ code: "", scientific_name: "", image: "", feeding_cycle_h: "", rest_cycle_h: "" }); setEditingSpecies(true); };
+  const newSpecies = () => {
+    setSpeciesEditorId(null);
+    setSpeciesDraft({
+      code: "",
+      scientific_name: "",
+      image: "",
+      feeding_cycle_h: "",
+      rest_cycle_h: "",
+    });
+    setEditingSpecies(true);
+  };
 
   const loadPositions = useCallback(async () => {
     const records = await api<StimulationPosition[]>("/stimulation-positions");
@@ -502,13 +562,13 @@ export default function Home() {
     setForm((current) => ({
       ...current,
       position_id:
-        current.position_id && records.some(
-          (item) => String(item.position_id) === current.position_id,
-        )
+        current.position_id &&
+        records.some((item) => String(item.position_id) === current.position_id)
           ? current.position_id
           : "",
       position_2_id:
-        current.position_2_id && records.some(
+        current.position_2_id &&
+        records.some(
           (item) => String(item.position_id) === current.position_2_id,
         )
           ? current.position_2_id
@@ -517,13 +577,16 @@ export default function Home() {
     return records;
   }, []);
 
-  const loadSubjectPositionCombinationStatistics = useCallback(async (experimentId: number) => {
-    const records = await api<SubjectPositionCombinationStatistic[]>(
-      `/statistics/subject-position-combinations?experiment_id=${experimentId}`,
-    );
-    setSubjectPositionCombinationStatistics(records);
-    return records;
-  }, []);
+  const loadSubjectPositionCombinationStatistics = useCallback(
+    async (experimentId: number) => {
+      const records = await api<SubjectPositionCombinationStatistic[]>(
+        `/statistics/subject-position-combinations?experiment_id=${experimentId}`,
+      );
+      setSubjectPositionCombinationStatistics(records);
+      return records;
+    },
+    [],
+  );
 
   const refresh = useCallback(async () => {
     try {
@@ -640,8 +703,10 @@ export default function Home() {
           state.sdg_connected && state.camera_connected
             ? "所有硬件已连接。"
             : [
-                !state.sdg_connected && `SDG1022X: ${state.sdg_error || "连接失败"}`,
-                !state.camera_connected && `XIAO: ${state.camera_error || "连接失败"}`,
+                !state.sdg_connected &&
+                  `SDG1022X: ${state.sdg_error || "连接失败"}`,
+                !state.camera_connected &&
+                  `XIAO: ${state.camera_error || "连接失败"}`,
               ]
                 .filter(Boolean)
                 .join("；"),
@@ -869,7 +934,13 @@ export default function Home() {
 
   const newPosition = () => {
     setPositionEditorId(null);
-    setPositionDraft({ code: "", description: "", image: "", mark: null, species: "" });
+    setPositionDraft({
+      code: "",
+      description: "",
+      image: "",
+      mark: null,
+      species: "",
+    });
     setEditingPosition(true);
   };
 
@@ -911,7 +982,10 @@ export default function Home() {
       setEditingPosition(false);
       setField("position_id", String(record.position_id));
       setSelectedPositionImageId(record.image_id);
-      setNotice({ kind: "success", text: `Position “${record.code}” 已保存。` });
+      setNotice({
+        kind: "success",
+        text: `Position “${record.code}” 已保存。`,
+      });
     } catch (error) {
       setNotice({
         kind: "error",
@@ -930,7 +1004,10 @@ export default function Home() {
         method: "DELETE",
       });
       await loadPositions();
-      setNotice({ kind: "success", text: `Position “${position.code}” 已删除。` });
+      setNotice({
+        kind: "success",
+        text: `Position “${position.code}” 已删除。`,
+      });
     } catch (error) {
       setNotice({
         kind: "error",
@@ -944,7 +1021,10 @@ export default function Home() {
   const readPositionImage = (file: File | undefined) => {
     if (!file) return;
     if (!file.type.match(/^image\/(png|jpeg|webp|gif)$/)) {
-      setNotice({ kind: "error", text: "请选择 PNG、JPEG、WebP 或 GIF 图片。" });
+      setNotice({
+        kind: "error",
+        text: "请选择 PNG、JPEG、WebP 或 GIF 图片。",
+      });
       return;
     }
     if (file.size > 2_000_000) {
@@ -1077,9 +1157,7 @@ export default function Home() {
           ...rowEdit,
           trial_no: Number(rowEdit.trial_no),
           stimulation_position_id: Number(rowEdit.stimulation_position_id),
-          stimulation_position_2_id: Number(
-            rowEdit.stimulation_position_2_id,
-          ),
+          stimulation_position_2_id: Number(rowEdit.stimulation_position_2_id),
           stimulation_high_level_v: Number(rowEdit.stimulation_high_level_v),
           stimulation_low_level_v: Number(rowEdit.stimulation_low_level_v),
           stimulation_duty_cycle_pct: Number(
@@ -1343,15 +1421,20 @@ export default function Home() {
   const positionImages = positions.filter(
     (position, index, records) =>
       position.image_id !== null &&
-      records.findIndex((item) => item.image_id === position.image_id) === index,
+      records.findIndex((item) => item.image_id === position.image_id) ===
+        index,
   );
   const speciesImageOptions = speciesRecords.filter(
-    (species) => species.image && (!positionDraft.species || species.code === positionDraft.species),
+    (species) =>
+      species.image &&
+      (!positionDraft.species || species.code === positionDraft.species),
   );
   const activePositionImage =
     positionImages.find(
       (position) => position.image_id === selectedPositionImageId,
-    ) ?? positionImages[0] ?? null;
+    ) ??
+    positionImages[0] ??
+    null;
   const runPositionOne = positions.find(
     (position) => String(position.position_id) === form.position_id,
   );
@@ -1359,7 +1442,8 @@ export default function Home() {
     (subject) => subject.subject_id === form.subject_id,
   )?.species;
   const runPositions = positions.filter(
-    (position) => !position.species || position.species === selectedSubjectSpecies,
+    (position) =>
+      !position.species || position.species === selectedSubjectSpecies,
   );
   const runPositionTwo = positions.find(
     (position) => String(position.position_id) === form.position_2_id,
@@ -1377,11 +1461,17 @@ export default function Home() {
         setView("manage");
         // Species are currently maintained as the species field on Subjects.
         if (section === "statistics") {
-          const experimentId = managedExperimentId ?? experiments[0]?.experiment_id ?? null;
+          const experimentId =
+            managedExperimentId ?? experiments[0]?.experiment_id ?? null;
           setStatisticsExperimentId(experimentId);
-          if (experimentId) void loadSubjectPositionCombinationStatistics(experimentId).catch(() => setSubjectPositionCombinationStatistics([]));
+          if (experimentId)
+            void loadSubjectPositionCombinationStatistics(experimentId).catch(
+              () => setSubjectPositionCombinationStatistics([]),
+            );
         }
-        setManageTab((section === "species" ? "subjects" : section) as typeof manageTab);
+        setManageTab(
+          (section === "species" ? "subjects" : section) as typeof manageTab,
+        );
       }}
       onWorkspaceChange={(workspace) => {
         setView(workspace);
@@ -1454,9 +1544,17 @@ export default function Home() {
                 onChange={(event) => {
                   const subjectId = event.target.value;
                   setField("subject_id", subjectId);
-                  const selectedSubject = subjects.find((subject) => subject.subject_id === subjectId);
-                  if (selectedSubject && selectedSubject.status !== "正常") {
-                    setNotice({ kind: "error", text: `警告：${selectedSubject.subject_id} 当前状态为${selectedSubject.status}。` });
+                  const selectedSubject = subjects.find(
+                    (subject) => subject.subject_id === subjectId,
+                  );
+                  if (
+                    selectedSubject &&
+                    subjectStatus(selectedSubject) !== "正常"
+                  ) {
+                    setNotice({
+                      kind: "error",
+                      text: `警告：${selectedSubject.subject_id} 当前状态为${subjectStatus(selectedSubject)}。`,
+                    });
                   }
                   void lookupSubject(subjectId);
                 }}
@@ -1522,14 +1620,15 @@ export default function Home() {
               className={`rounded-md px-4 py-2 text-sm font-semibold ${manageTab === "statistics" ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-500"}`}
               onClick={() => {
                 setManageTab("statistics");
-                const experimentId = managedExperimentId ?? experiments[0]?.experiment_id ?? null;
+                const experimentId =
+                  managedExperimentId ?? experiments[0]?.experiment_id ?? null;
                 setStatisticsExperimentId(experimentId);
                 if (experimentId === null) {
                   setSubjectPositionCombinationStatistics([]);
                 } else {
-                  void loadSubjectPositionCombinationStatistics(experimentId).catch(() =>
-                    setSubjectPositionCombinationStatistics([]),
-                  );
+                  void loadSubjectPositionCombinationStatistics(
+                    experimentId,
+                  ).catch(() => setSubjectPositionCombinationStatistics([]));
                 }
               }}
             >
@@ -1538,53 +1637,55 @@ export default function Home() {
           </div>
           {manageTab !== "statistics" && (
             <div className="relative min-w-0 flex-1">
-            <MagnifyingGlassIcon className="pointer-events-none absolute left-3 top-1/2 size-5 -translate-y-1/2 text-zinc-400" />
-            <Input
-              type="search"
-              value={
-                manageTab === "experiments"
-                  ? experimentQuery
-                  : manageTab === "subjects"
-                    ? subjectQuery
-                    : positionQuery
-              }
-              onChange={(event) =>
-                manageTab === "experiments"
-                  ? setExperimentQuery(event.target.value)
-                  : manageTab === "subjects"
-                    ? setSubjectQuery(event.target.value)
-                    : setPositionQuery(event.target.value)
-              }
-              placeholder={
-                manageTab === "experiments"
-                  ? "搜索 Experiment 标题、描述或 ID…"
-                  : manageTab === "subjects"
-                    ? "搜索 Subject ID 或备注…"
-                    : "搜索 Position code 或描述…"
-              }
-              className="pl-10"
-            />
+              <MagnifyingGlassIcon className="pointer-events-none absolute left-3 top-1/2 size-5 -translate-y-1/2 text-zinc-400" />
+              <Input
+                type="search"
+                value={
+                  manageTab === "experiments"
+                    ? experimentQuery
+                    : manageTab === "subjects"
+                      ? subjectQuery
+                      : positionQuery
+                }
+                onChange={(event) =>
+                  manageTab === "experiments"
+                    ? setExperimentQuery(event.target.value)
+                    : manageTab === "subjects"
+                      ? setSubjectQuery(event.target.value)
+                      : setPositionQuery(event.target.value)
+                }
+                placeholder={
+                  manageTab === "experiments"
+                    ? "搜索 Experiment 标题、描述或 ID…"
+                    : manageTab === "subjects"
+                      ? "搜索 Subject ID 或备注…"
+                      : "搜索 Position code 或描述…"
+                }
+                className="pl-10"
+              />
             </div>
           )}
           {manageTab !== "statistics" && (
             <Button
-            onClick={
-              manageTab === "experiments"
-                ? newExperiment
+              onClick={
+                manageTab === "experiments"
+                  ? newExperiment
+                  : manageTab === "subjects"
+                    ? newSubject
+                    : manageTab === "positions"
+                      ? newPosition
+                      : newSpecies
+              }
+              className="shrink-0"
+            >
+              <PlusIcon className="size-4" />
+              {manageTab === "experiments"
+                ? "新建 Experiment"
                 : manageTab === "subjects"
-                  ? newSubject
+                  ? "新建 Subject"
                   : manageTab === "positions"
-                    ? newPosition
-                    : newSpecies
-            }
-            className="shrink-0"
-          >
-            <PlusIcon className="size-4" />
-            {manageTab === "experiments"
-              ? "新建 Experiment"
-              : manageTab === "subjects"
-              ? "新建 Subject"
-                : manageTab === "positions" ? "新建 Position" : "新建 Species"}
+                    ? "新建 Position"
+                    : "新建 Species"}
             </Button>
           )}
         </section>
@@ -1819,7 +1920,10 @@ export default function Home() {
         onClose={() => setEditingPosition(false)}
       >
         <div className="grid gap-5">
-          <Field label="CODE" hint="例如 A1；只能使用字母、数字、下划线和连字符。">
+          <Field
+            label="CODE"
+            hint="例如 A1；只能使用字母、数字、下划线和连字符。"
+          >
             <Input
               value={positionDraft.code}
               onChange={(event) =>
@@ -1844,30 +1948,49 @@ export default function Home() {
               placeholder="位置说明、解剖标记或操作备注…"
             />
           </Field>
-          <Field label="SPECIES" hint="该位置及照片仅用于对应物种；留空表示通用。">
+          <Field
+            label="SPECIES"
+            hint="该位置及照片仅用于对应物种；留空表示通用。"
+          >
             <Select
               value={positionDraft.species}
               onChange={(event) =>
                 setPositionDraft((current) => ({
                   ...current,
                   species: event.target.value,
-                  image: speciesRecords.find((species) => species.code === event.target.value)?.image ?? "",
+                  image:
+                    speciesRecords.find(
+                      (species) => species.code === event.target.value,
+                    )?.image ?? "",
                   mark: null,
                 }))
               }
             >
               <option value="">通用位置</option>
-              {Array.from(new Set(subjects.map((subject) => subject.species).filter(Boolean) as string[])).map((species) => (
-                <option key={species} value={species}>{species}</option>
+              {speciesRecords.map((species) => (
+                <option key={species.species_id} value={species.code}>
+                  {species.code} · {species.scientific_name}
+                </option>
               ))}
             </Select>
           </Field>
-          <Field label="IMAGE" hint="图片由所选 Species 自动提供。" className="hidden">
+          <Field
+            label="IMAGE"
+            hint="图片由所选 Species 自动提供。"
+            className="hidden"
+          >
             {speciesImageOptions.length > 0 && (
               <Select
-                value={speciesImageOptions.find((species) => species.image === positionDraft.image)?.species_id?.toString() ?? ""}
+                value={
+                  speciesImageOptions
+                    .find((species) => species.image === positionDraft.image)
+                    ?.species_id?.toString() ?? ""
+                }
                 onChange={(event) => {
-                  const selectedImage = speciesImageOptions.find((species) => String(species.species_id) === event.target.value);
+                  const selectedImage = speciesImageOptions.find(
+                    (species) =>
+                      String(species.species_id) === event.target.value,
+                  );
                   setPositionDraft((current) => ({
                     ...current,
                     image: selectedImage?.image ?? "",
@@ -1933,24 +2056,104 @@ export default function Home() {
             </div>
           )}
           <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={() => setEditingPosition(false)}>
+            <Button
+              variant="secondary"
+              onClick={() => setEditingPosition(false)}
+            >
               取消
             </Button>
-            <Button onClick={() => void savePosition()} disabled={positionSaving}>
+            <Button
+              onClick={() => void savePosition()}
+              disabled={positionSaving}
+            >
               {positionSaving ? "保存中…" : "保存 Position"}
             </Button>
           </div>
         </div>
       </Dialog>
 
-      <Dialog open={editingSpecies} title={speciesEditorId === null ? "New Species" : "Edit Species"} closeLabel="关闭" onClose={() => setEditingSpecies(false)}>
+      <Dialog
+        open={editingSpecies}
+        title={speciesEditorId === null ? "New Species" : "Edit Species"}
+        closeLabel="关闭"
+        onClose={() => setEditingSpecies(false)}
+      >
         <div className="grid gap-4">
-          <Field label="CODE"><Input value={speciesDraft.code} onChange={(event) => setSpeciesDraft((current) => ({ ...current, code: event.target.value }))} /></Field>
-          <Field label="SCIENTIFIC NAME"><Input value={speciesDraft.scientific_name} onChange={(event) => setSpeciesDraft((current) => ({ ...current, scientific_name: event.target.value }))} /></Field>
-          <Field label="FEEDING CYCLE (h)"><Input type="number" min="0" value={speciesDraft.feeding_cycle_h} onChange={(event) => setSpeciesDraft((current) => ({ ...current, feeding_cycle_h: event.target.value }))} /></Field>
-          <Field label="REST CYCLE (h)"><Input type="number" min="0" value={speciesDraft.rest_cycle_h} onChange={(event) => setSpeciesDraft((current) => ({ ...current, rest_cycle_h: event.target.value }))} /></Field>
-          <Field label="IMAGE"><Input type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={(event) => { const file = event.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = () => setSpeciesDraft((current) => ({ ...current, image: typeof reader.result === "string" ? reader.result : "" })); reader.readAsDataURL(file); }} /></Field>
-          <div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => setEditingSpecies(false)}>取消</Button><Button onClick={() => void saveSpecies()}>保存 Species</Button></div>
+          <Field label="CODE">
+            <Input
+              value={speciesDraft.code}
+              onChange={(event) =>
+                setSpeciesDraft((current) => ({
+                  ...current,
+                  code: event.target.value,
+                }))
+              }
+            />
+          </Field>
+          <Field label="SCIENTIFIC NAME">
+            <Input
+              value={speciesDraft.scientific_name}
+              onChange={(event) =>
+                setSpeciesDraft((current) => ({
+                  ...current,
+                  scientific_name: event.target.value,
+                }))
+              }
+            />
+          </Field>
+          <Field label="FEEDING CYCLE (h)">
+            <Input
+              type="number"
+              min="0"
+              value={speciesDraft.feeding_cycle_h}
+              onChange={(event) =>
+                setSpeciesDraft((current) => ({
+                  ...current,
+                  feeding_cycle_h: event.target.value,
+                }))
+              }
+            />
+          </Field>
+          <Field label="REST CYCLE (h)">
+            <Input
+              type="number"
+              min="0"
+              value={speciesDraft.rest_cycle_h}
+              onChange={(event) =>
+                setSpeciesDraft((current) => ({
+                  ...current,
+                  rest_cycle_h: event.target.value,
+                }))
+              }
+            />
+          </Field>
+          <Field label="IMAGE">
+            <Input
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = () =>
+                  setSpeciesDraft((current) => ({
+                    ...current,
+                    image:
+                      typeof reader.result === "string" ? reader.result : "",
+                  }));
+                reader.readAsDataURL(file);
+              }}
+            />
+          </Field>
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => setEditingSpecies(false)}
+            >
+              取消
+            </Button>
+            <Button onClick={() => void saveSpecies()}>保存 Species</Button>
+          </div>
         </div>
       </Dialog>
 
@@ -2249,11 +2452,15 @@ export default function Home() {
                       />
                     </div>
                     <div className="playback-video-pane">
-                      <span className="playback-pane-label">VIDEO PLAYBACK</span>
+                      <span className="playback-pane-label">
+                        VIDEO PLAYBACK
+                      </span>
                       <video
                         key={pendingTrial.video_id}
                         style={{
-                          transform: `${cameraMirrored ? "scaleX(-1) " : ""}${cameraFlipped ? "rotate(90deg)" : ""}`.trim() || "none",
+                          transform:
+                            `${cameraMirrored ? "scaleX(-1) " : ""}${cameraFlipped ? "rotate(90deg)" : ""}`.trim() ||
+                            "none",
                         }}
                         controls
                         preload="metadata"
@@ -2266,9 +2473,13 @@ export default function Home() {
                     {devices?.camera_connected && !devices.mock ? (
                       <img
                         src={`/backend/camera/frame?t=${previewTick}`}
-                        alt={running ? "实验录像实时画面" : "摄像机空闲实时预览"}
+                        alt={
+                          running ? "实验录像实时画面" : "摄像机空闲实时预览"
+                        }
                         style={{
-                          transform: `${cameraMirrored ? "scaleX(-1) " : ""}${cameraFlipped ? "rotate(90deg)" : ""}`.trim() || "none",
+                          transform:
+                            `${cameraMirrored ? "scaleX(-1) " : ""}${cameraFlipped ? "rotate(90deg)" : ""}`.trim() ||
+                            "none",
                         }}
                       />
                     ) : (
@@ -2387,10 +2598,64 @@ export default function Home() {
             </>
           ) : manageTab === "subjects" ? (
             <section className="panel history-panel subject-records-panel">
-              <div className="history-header"><div className="section-heading"><h2>Species</h2></div><Button className="min-h-9 px-3 text-xs" onClick={newSpecies}><PlusIcon className="size-4" />新建 Species</Button></div>
-              <div className="table-wrap"><table><thead><tr><th>CODE</th><th>SCIENTIFIC NAME</th><th>ACTIONS</th></tr></thead><tbody>
-                {speciesRecords.map((species) => <tr key={species.species_id}><td>{species.code}</td><td>{species.scientific_name}</td><td><button type="button" onClick={() => { setSpeciesEditorId(species.species_id); setSpeciesDraft({ code: species.code, scientific_name: species.scientific_name, image: species.image ?? "", feeding_cycle_h: species.feeding_cycle_h?.toString() ?? "", rest_cycle_h: species.rest_cycle_h?.toString() ?? "" }); setEditingSpecies(true); }}>编辑</button> <button type="button" onClick={() => void api(`/species/${species.species_id}`, { method: "DELETE" }).then(() => loadSpecies())}>删除</button></td></tr>)}
-              </tbody></table></div>
+              <div className="history-header">
+                <div className="section-heading">
+                  <h2>Species</h2>
+                </div>
+                <Button className="min-h-9 px-3 text-xs" onClick={newSpecies}>
+                  <PlusIcon className="size-4" />
+                  新建 Species
+                </Button>
+              </div>
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>CODE</th>
+                      <th>SCIENTIFIC NAME</th>
+                      <th>ACTIONS</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {speciesRecords.map((species) => (
+                      <tr key={species.species_id}>
+                        <td>{species.code}</td>
+                        <td>{species.scientific_name}</td>
+                        <td>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSpeciesEditorId(species.species_id);
+                              setSpeciesDraft({
+                                code: species.code,
+                                scientific_name: species.scientific_name,
+                                image: species.image ?? "",
+                                feeding_cycle_h:
+                                  species.feeding_cycle_h?.toString() ?? "",
+                                rest_cycle_h:
+                                  species.rest_cycle_h?.toString() ?? "",
+                              });
+                              setEditingSpecies(true);
+                            }}
+                          >
+                            编辑
+                          </button>{" "}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void api(`/species/${species.species_id}`, {
+                                method: "DELETE",
+                              }).then(() => loadSpecies())
+                            }
+                          >
+                            删除
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </section>
           ) : manageTab === "positions" ? (
             <section className="panel p-4">
@@ -3173,6 +3438,7 @@ export default function Home() {
                       <th>MANDIBLE</th>
                       <th>WEIGHT</th>
                       <th>SPECIES</th>
+                      <th>STATUS</th>
                       <th>TRIALS</th>
                       <th>CREATED</th>
                       <th>ACTIONS</th>
@@ -3180,7 +3446,10 @@ export default function Home() {
                   </thead>
                   <tbody>
                     {visibleSubjects.map((subject) => (
-                      <tr key={subject.subject_id} className={subject.status !== "正常" ? "text-zinc-400" : ""}>
+                      <tr
+                        key={subject.subject_id}
+                        className={subjectStatus(subject) !== "正常" ? "subject-status-muted" : ""}
+                      >
                         <td>
                           <strong>{subject.subject_id}</strong>
                         </td>
@@ -3209,12 +3478,33 @@ export default function Home() {
                           </small>
                         </td>
                         <td>{subject.species || "—"}</td>
+                        <td>{subjectStatus(subject)}</td>
                         <td>{subject.trial_count}</td>
                         <td>{subject.created_at?.slice(0, 16) ?? "—"}</td>
                         <td>
                           <div className="row-actions">
-                            <button onClick={() => void api(`/subjects/${subject.subject_id}/feed`, { method: "POST" }).then(() => loadSubjects())} disabled={running}>Feed</button>
-                            <button onClick={() => void api(`/subjects/${subject.subject_id}/test`, { method: "POST" }).then(() => loadSubjects())} disabled={running}>Test</button>
+                            <button
+                              onClick={() =>
+                                void api(
+                                  `/subjects/${subject.subject_id}/feed`,
+                                  { method: "POST" },
+                                ).then(() => loadSubjects())
+                              }
+                              disabled={running}
+                            >
+                              Feed
+                            </button>
+                            <button
+                              onClick={() =>
+                                void api(
+                                  `/subjects/${subject.subject_id}/test`,
+                                  { method: "POST" },
+                                ).then(() => loadSubjects())
+                              }
+                              disabled={running}
+                            >
+                              Test
+                            </button>
                             <button
                               onClick={() => editSubject(subject)}
                               disabled={running}
@@ -3270,7 +3560,9 @@ export default function Home() {
                   <article
                     key={position.position_id}
                     className={`cursor-pointer overflow-hidden rounded-xl border bg-white ${activePositionImage?.image_id === position.image_id ? "border-zinc-950 ring-2 ring-zinc-200" : "border-zinc-200"}`}
-                    onClick={() => setSelectedPositionImageId(position.image_id)}
+                    onClick={() =>
+                      setSelectedPositionImageId(position.image_id)
+                    }
                   >
                     {position.image ? (
                       <div className="flex h-48 items-center justify-center bg-zinc-100">
@@ -3304,7 +3596,8 @@ export default function Home() {
                         </p>
                       </div>
                       <small className="text-zinc-500">
-                        ID {position.position_id} · {position.trial_count} trials
+                        ID {position.position_id} · {position.trial_count}{" "}
+                        trials
                       </small>
                       <div className="flex gap-2">
                         <Button
@@ -3325,18 +3618,26 @@ export default function Home() {
                             positionDeleting === position.position_id
                           }
                         >
-                          {positionDeleting === position.position_id ? "…" : "删除"}
+                          {positionDeleting === position.position_id
+                            ? "…"
+                            : "删除"}
                         </Button>
                       </div>
                       {position.trial_count > 0 && (
-                        <small className="text-zinc-500">已被 Trial 使用，不能删除。</small>
+                        <small className="text-zinc-500">
+                          已被 Trial 使用，不能删除。
+                        </small>
                       )}
                     </div>
                   </article>
                 ))}
                 {visiblePositions.length === 0 && (
                   <EmptyState
-                    title={positions.length === 0 ? "还没有 Position" : "没有匹配的 Position"}
+                    title={
+                      positions.length === 0
+                        ? "还没有 Position"
+                        : "没有匹配的 Position"
+                    }
                     description="创建并标记刺激位置后，才能开始实验。"
                   />
                 )}
@@ -3360,12 +3661,16 @@ export default function Home() {
                     <Select
                       value={statisticsExperimentId?.toString() ?? ""}
                       onChange={(event) => {
-                        const experimentId = event.target.value ? Number(event.target.value) : null;
+                        const experimentId = event.target.value
+                          ? Number(event.target.value)
+                          : null;
                         setStatisticsExperimentId(experimentId);
                         if (experimentId === null) {
                           setSubjectPositionCombinationStatistics([]);
                         } else {
-                          void loadSubjectPositionCombinationStatistics(experimentId).catch(() =>
+                          void loadSubjectPositionCombinationStatistics(
+                            experimentId,
+                          ).catch(() =>
                             setSubjectPositionCombinationStatistics([]),
                           );
                         }
@@ -3373,7 +3678,10 @@ export default function Home() {
                     >
                       <option value="">选择 Experiment…</option>
                       {experiments.map((experiment) => (
-                        <option key={experiment.experiment_id} value={experiment.experiment_id}>
+                        <option
+                          key={experiment.experiment_id}
+                          value={experiment.experiment_id}
+                        >
                           {experiment.title}
                         </option>
                       ))}
@@ -3388,14 +3696,14 @@ export default function Home() {
                   <div className="statistics-legend">
                     {statisticPositionCombinations.map(
                       (combination, combinationIndex) => (
-                      <span key={combination}>
-                        <i
-                          style={{
-                            backgroundColor: `hsl(${(combinationIndex * 67) % 360} 45% 48%)`,
-                          }}
-                        />
-                        {combination}
-                      </span>
+                        <span key={combination}>
+                          <i
+                            style={{
+                              backgroundColor: `hsl(${(combinationIndex * 67) % 360} 45% 48%)`,
+                            }}
+                          />
+                          {combination}
+                        </span>
                       ),
                     )}
                   </div>
@@ -3498,10 +3806,7 @@ export default function Home() {
               <p className="empty-log">System messages will appear here.</p>
             ) : (
               task.logs.map((log, index) => (
-                <div
-                  className="log-line"
-                  key={`${log.timestamp}-${index}`}
-                >
+                <div className="log-line" key={`${log.timestamp}-${index}`}>
                   <time>{log.timestamp.slice(11, 19)}</time>
                   <span>{log.message}</span>
                 </div>

@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 import csv
 from datetime import datetime
 import io
+import math
 from pathlib import Path
 import re
 import threading
@@ -31,6 +32,7 @@ class TrialRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     experiment_id: Optional[int] = Field(default=None, ge=1)
+    plan_id: Optional[int] = Field(default=None, ge=1)
     subject_id: str
     body_length_cm: Optional[float] = None
     body_weight_g: Optional[float] = None
@@ -61,6 +63,21 @@ class ExperimentRequest(BaseModel):
 
     title: str = Field(min_length=1, max_length=200)
     description: Optional[str] = Field(default=None, max_length=2000)
+
+
+class ExperimentPlanRequest(BaseModel):
+    subject_ids: list[str] = Field(min_length=1)
+    stimulation_position_id: int = Field(ge=1)
+    stimulation_position_2_id: int = Field(ge=1)
+    stimulation_waveform: str = "SQUARE"
+    stimulation_high_level_v: float
+    stimulation_low_level_v: float
+    stimulation_duty_cycle_pct: float = Field(gt=0, lt=100)
+    stimulation_frequency_hz: float = Field(gt=0)
+    stimulation_duration_s: float = Field(gt=0)
+    stimulation_count: int = Field(ge=1)
+    stimulation_interval_s: float = Field(ge=0)
+    trial_count: int = Field(default=1, ge=1)
 
 
 class SubjectRequest(BaseModel):
@@ -133,6 +150,26 @@ def _validate_position_pair(
         raise ValueError("两个 Stimulation Position 都必须设置图片和 mark。")
     if position["image_id"] != position_2["image_id"]:
         raise ValueError("两个 Stimulation Position 必须使用同一张图片。")
+
+
+def _is_symmetric_stimulation(high_level_v: float, low_level_v: float, duty_cycle_pct: float) -> bool:
+    return math.isclose(abs(high_level_v), abs(low_level_v), abs_tol=1e-9) and math.isclose(
+        duty_cycle_pct, 50.0, abs_tol=1e-9
+    )
+
+
+def _canonical_positions(
+    position: dict[str, Any],
+    position_2: dict[str, Any],
+    high_level_v: float,
+    low_level_v: float,
+    duty_cycle_pct: float,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    if _is_symmetric_stimulation(high_level_v, low_level_v, duty_cycle_pct) and (
+        position["code"].casefold(), position["position_id"]
+    ) > (position_2["code"].casefold(), position_2["position_id"]):
+        return position_2, position
+    return position, position_2
 
 
 class TrialUpdateRequest(BaseModel):
@@ -236,6 +273,25 @@ class ExperimentController:
             if position is None or position_2 is None:
                 raise ValueError("请选择数据库中已标记的 Stimulation Position。")
             _validate_position_pair(position, position_2)
+            position, position_2 = _canonical_positions(
+                position,
+                position_2,
+                request.high_level_v,
+                request.low_level_v,
+                request.duty_cycle_pct,
+            )
+            if request.plan_id is not None:
+                plan = next((item for item in self.db.list_experiment_plans(request.experiment_id or 0) if item["plan_id"] == request.plan_id), None)
+                if plan is None or plan["completed_trial_count"] >= plan["trial_count"]:
+                    raise ValueError("所选实验计划不存在或已完成。")
+                plan_positions = (plan["stimulation_position_id"], plan["stimulation_position_2_id"])
+                request_positions = (position["position_id"], position_2["position_id"])
+                positions_match = plan_positions == request_positions or (
+                    _is_symmetric_stimulation(request.high_level_v, request.low_level_v, request.duty_cycle_pct)
+                    and set(plan_positions) == set(request_positions)
+                )
+                if (plan["subject_id"] != subject_id or not positions_match or plan["stimulation_high_level_v"] != request.high_level_v or plan["stimulation_low_level_v"] != request.low_level_v or plan["stimulation_frequency_hz"] != request.frequency_hz):
+                    raise ValueError("当前 Trial 参数与下一条实验计划不一致。")
 
             subject = Subject(
                 subject_id=subject_id,
@@ -278,6 +334,7 @@ class ExperimentController:
             result = self.runner.run_trial(trial_config)
             with self._lock:
                 self._task_result = result.to_dict()
+                self._task_result["plan_id"] = request.plan_id
                 self._task_status = result.status
 
         threading.Thread(target=worker, name=f"trial-{task_id[:8]}", daemon=True).start()
@@ -301,6 +358,8 @@ class ExperimentController:
             result["response_action"] = annotation.response_action
             result["response_degree"] = annotation.response_degree
             trial_id = self.db.insert_trial(result)
+            if result.get("plan_id") is not None:
+                self.db.complete_experiment_plan_trial(int(result["plan_id"]))
             result["trial_id"] = trial_id
             self._task_result = result
             self._task_status = "IDLE"
@@ -622,11 +681,101 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
         controller.db.delete_experiment(experiment_id)
         return {"deleted": True}
 
+    @app.get("/api/experiments/{experiment_id}/plans")
+    def experiment_plans(experiment_id: int) -> list[dict[str, Any]]:
+        return controller.db.list_experiment_plans(experiment_id)
+
+    @app.post("/api/experiments/{experiment_id}/plans", status_code=status.HTTP_201_CREATED)
+    def create_experiment_plan(experiment_id: int, request: ExperimentPlanRequest) -> dict[str, Any]:
+        red = controller.db.get_stimulation_position(request.stimulation_position_id)
+        black = controller.db.get_stimulation_position(request.stimulation_position_2_id)
+        if red is None or black is None:
+            raise HTTPException(status_code=422, detail="请选择两个不同的有效刺激点位。")
+        try:
+            _validate_position_pair(red, black)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        red, black = _canonical_positions(
+            red,
+            black,
+            request.stimulation_high_level_v,
+            request.stimulation_low_level_v,
+            request.stimulation_duty_cycle_pct,
+        )
+        subject_ids = list(dict.fromkeys(item.strip() for item in request.subject_ids if item.strip()))
+        if not subject_ids or any(controller.db.get_subject(subject_id) is None for subject_id in subject_ids):
+            raise HTTPException(status_code=422, detail="一个或多个待测实验品不存在。")
+        plan_ids = []
+        for subject_id in subject_ids:
+            plan_ids.append(controller.db.create_experiment_plan({
+                "experiment_id": experiment_id,
+                "subject_id": subject_id,
+                "stimulation_position_id": red["position_id"],
+                "stimulation_position_2_id": black["position_id"],
+                "stimulation_position": f"{red['code']}{black['code']}",
+                "stimulation_voltage_v": request.stimulation_high_level_v-request.stimulation_low_level_v,
+                "stimulation_waveform": request.stimulation_waveform.upper(),
+                "stimulation_high_level_v": request.stimulation_high_level_v,
+                "stimulation_low_level_v": request.stimulation_low_level_v,
+                "stimulation_duty_cycle_pct": request.stimulation_duty_cycle_pct,
+                "stimulation_frequency_hz": request.stimulation_frequency_hz,
+                "stimulation_duration_s": request.stimulation_duration_s,
+                "stimulation_count": request.stimulation_count,
+                "stimulation_interval_s": request.stimulation_interval_s,
+                "trial_count": request.trial_count,
+            }))
+        plans = controller.db.list_experiment_plans(experiment_id)
+        return {"created": [item for item in plans if item["plan_id"] in plan_ids]}
+
+    @app.delete("/api/experiment-plans/{plan_id}")
+    def delete_experiment_plan(plan_id: int) -> dict[str, bool]:
+        if not controller.db.delete_experiment_plan(plan_id):
+            raise HTTPException(status_code=404, detail="计划不存在。")
+        return {"deleted": True}
+
+    @app.put("/api/experiments/{experiment_id}/plans/{plan_id}")
+    def update_experiment_plan(experiment_id: int, plan_id: int, request: ExperimentPlanRequest) -> dict[str, Any]:
+        if len(request.subject_ids) != 1:
+            raise HTTPException(status_code=422, detail="编辑单条计划时只能选择一个实验品。")
+        subject_id = request.subject_ids[0]
+        red = controller.db.get_stimulation_position(request.stimulation_position_id)
+        black = controller.db.get_stimulation_position(request.stimulation_position_2_id)
+        if controller.db.get_subject(subject_id) is None or red is None or black is None:
+            raise HTTPException(status_code=422, detail="实验品或刺激点位不存在。")
+        try:
+            _validate_position_pair(red, black)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        red, black = _canonical_positions(
+            red,
+            black,
+            request.stimulation_high_level_v,
+            request.stimulation_low_level_v,
+            request.stimulation_duty_cycle_pct,
+        )
+        updated = controller.db.update_experiment_plan(plan_id, {
+            "experiment_id": experiment_id, "subject_id": subject_id,
+            "stimulation_position_id": red["position_id"], "stimulation_position_2_id": black["position_id"],
+            "stimulation_position": f"{red['code']}{black['code']}",
+            "stimulation_voltage_v": request.stimulation_high_level_v-request.stimulation_low_level_v,
+            "stimulation_waveform": request.stimulation_waveform.upper(),
+            "stimulation_high_level_v": request.stimulation_high_level_v, "stimulation_low_level_v": request.stimulation_low_level_v,
+            "stimulation_duty_cycle_pct": request.stimulation_duty_cycle_pct,
+            "stimulation_frequency_hz": request.stimulation_frequency_hz,
+            "stimulation_duration_s": request.stimulation_duration_s,
+            "stimulation_count": request.stimulation_count,
+            "stimulation_interval_s": request.stimulation_interval_s,
+            "trial_count": request.trial_count,
+        })
+        if not updated:
+            raise HTTPException(status_code=404, detail="计划不存在。")
+        return next(item for item in controller.db.list_experiment_plans(experiment_id) if item["plan_id"] == plan_id)
+
     @app.get("/api/trials")
     def trials(
         subject_id: Optional[str] = None,
         experiment_id: Optional[int] = Query(default=None, ge=1),
-        limit: int = Query(default=50, ge=1, le=200),
+        limit: int = Query(default=50, ge=1, le=100_000),
     ) -> list[dict[str, Any]]:
         return controller.db.list_trials(
             subject_id=subject_id,
@@ -753,6 +902,15 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
             ) from exc
         values = request.model_dump(exclude_unset=True)
         values["subject_id"] = subject_id
+        position, position_2 = _canonical_positions(
+            position,
+            position_2,
+            request.stimulation_high_level_v,
+            request.stimulation_low_level_v,
+            request.stimulation_duty_cycle_pct,
+        )
+        values["stimulation_position_id"] = position["position_id"]
+        values["stimulation_position_2_id"] = position_2["position_id"]
         values["stimulation_position"] = f"{position['code']}{position_2['code']}"
         values["stimulation_voltage_v"] = request.stimulation_high_level_v - request.stimulation_low_level_v
         updated = controller.db.update_trial(trial_id, values)
@@ -773,6 +931,8 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
         deleted = controller.db.delete_trial(trial_id)
         if not deleted:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trial not found")
+        if record.get("plan_id") is not None:
+            controller.db.uncomplete_experiment_plan_trial(int(record["plan_id"]))
         # Remove the recording only when no remaining Trial references it.
         stored_path = Path(record.get("video_file") or "")
         video_root = cfg.VIDEO_DIR.resolve()

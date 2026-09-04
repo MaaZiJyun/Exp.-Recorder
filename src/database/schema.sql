@@ -59,8 +59,33 @@ CREATE TABLE IF NOT EXISTS stimulation_position_species (
     FOREIGN KEY (species_id) REFERENCES species(species_id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS experiment_plans (
+    plan_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    experiment_id INTEGER NOT NULL,
+    subject_id TEXT NOT NULL,
+    stimulation_position_id INTEGER NOT NULL,
+    stimulation_position_2_id INTEGER NOT NULL,
+    stimulation_position TEXT NOT NULL,
+    stimulation_voltage_v REAL NOT NULL,
+    stimulation_waveform TEXT NOT NULL DEFAULT 'SQUARE',
+    stimulation_high_level_v REAL NOT NULL,
+    stimulation_low_level_v REAL NOT NULL,
+    stimulation_duty_cycle_pct REAL NOT NULL DEFAULT 50,
+    stimulation_frequency_hz REAL NOT NULL,
+    stimulation_duration_s REAL NOT NULL,
+    stimulation_count INTEGER NOT NULL DEFAULT 1,
+    stimulation_interval_s REAL NOT NULL DEFAULT 0,
+    trial_count INTEGER NOT NULL DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (experiment_id) REFERENCES experiment(experiment_id) ON DELETE CASCADE,
+    FOREIGN KEY (subject_id) REFERENCES subjects(subject_id),
+    FOREIGN KEY (stimulation_position_id) REFERENCES stimulation_positions(position_id),
+    FOREIGN KEY (stimulation_position_2_id) REFERENCES stimulation_positions(position_id)
+);
+
 CREATE TABLE IF NOT EXISTS trials (
     trial_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    plan_id INTEGER,
     experiment_id INTEGER,
     subject_id TEXT NOT NULL,
     trial_no INTEGER NOT NULL,
@@ -97,6 +122,7 @@ CREATE TABLE IF NOT EXISTS trials (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     
     FOREIGN KEY (experiment_id) REFERENCES experiment (experiment_id),
+    FOREIGN KEY (plan_id) REFERENCES experiment_plans(plan_id),
     FOREIGN KEY (subject_id) REFERENCES subjects (subject_id),
     FOREIGN KEY (stimulation_position_id) REFERENCES stimulation_positions (position_id),
     FOREIGN KEY (stimulation_position_2_id) REFERENCES stimulation_positions (position_id)

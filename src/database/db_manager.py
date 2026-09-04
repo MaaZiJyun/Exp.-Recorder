@@ -35,6 +35,7 @@ class DatabaseManager:
             }
             migrations = {
                 "experiment_id": "INTEGER REFERENCES experiment(experiment_id)",
+                "plan_id": "INTEGER REFERENCES experiment_plans(plan_id)",
                 "stimulation_position_id": "INTEGER REFERENCES stimulation_positions(position_id)",
                 "stimulation_position_2_id": "INTEGER REFERENCES stimulation_positions(position_id)",
                 "stimulation_waveform": "TEXT NOT NULL DEFAULT 'SQUARE'",
@@ -45,6 +46,46 @@ class DatabaseManager:
             for column, definition in migrations.items():
                 if column not in existing_columns:
                     conn.execute(f"ALTER TABLE trials ADD COLUMN {column} {definition}")
+            existing_plan_columns = {row["name"] for row in conn.execute("PRAGMA table_info(experiment_plans)").fetchall()}
+            plan_migrations = {
+                "stimulation_position_id": "INTEGER",
+                "stimulation_position_2_id": "INTEGER", "stimulation_position": "TEXT",
+                "stimulation_voltage_v": "REAL", "stimulation_waveform": "TEXT DEFAULT 'SQUARE'",
+                "stimulation_high_level_v": "REAL", "stimulation_low_level_v": "REAL",
+                "stimulation_duty_cycle_pct": "REAL DEFAULT 50", "stimulation_frequency_hz": "REAL",
+                "stimulation_duration_s": "REAL DEFAULT 0.5", "stimulation_count": "INTEGER DEFAULT 1",
+                "stimulation_interval_s": "REAL DEFAULT 0",
+                "trial_count": "INTEGER NOT NULL DEFAULT 1",
+            }
+            for column, definition in plan_migrations.items():
+                if column not in existing_plan_columns:
+                    conn.execute(f"ALTER TABLE experiment_plans ADD COLUMN {column} {definition}")
+            if "red_position_id" in existing_plan_columns:
+                conn.execute("""UPDATE experiment_plans SET
+                    stimulation_position_id=COALESCE(stimulation_position_id, red_position_id),
+                    stimulation_position_2_id=COALESCE(stimulation_position_2_id, black_position_id),
+                    stimulation_position=COALESCE(stimulation_position, position_combination),
+                    stimulation_high_level_v=COALESCE(stimulation_high_level_v, high_level_v),
+                    stimulation_low_level_v=COALESCE(stimulation_low_level_v, low_level_v),
+                    stimulation_voltage_v=COALESCE(stimulation_voltage_v, high_level_v-low_level_v),
+                    stimulation_frequency_hz=COALESCE(stimulation_frequency_hz, frequency_hz)
+                """)
+            # Symmetric 50% bipolar stimulation has no first/second position;
+            # normalize both historical and future-facing records by position code.
+            for table in ("experiment_plans", "trials"):
+                conn.execute(f"""UPDATE {table}
+                    SET stimulation_position_id = stimulation_position_2_id,
+                        stimulation_position_2_id = stimulation_position_id,
+                        stimulation_position =
+                            (SELECT code FROM stimulation_positions WHERE position_id = {table}.stimulation_position_2_id) ||
+                            (SELECT code FROM stimulation_positions WHERE position_id = {table}.stimulation_position_id)
+                    WHERE ABS(ABS(stimulation_high_level_v) - ABS(stimulation_low_level_v)) < 0.000000001
+                      AND ABS(stimulation_duty_cycle_pct - 50.0) < 0.000000001
+                      AND (SELECT code FROM stimulation_positions WHERE position_id = {table}.stimulation_position_id) COLLATE NOCASE >
+                          (SELECT code FROM stimulation_positions WHERE position_id = {table}.stimulation_position_2_id) COLLATE NOCASE
+                """)
+            for plan in conn.execute("SELECT * FROM experiment_plans ORDER BY plan_id").fetchall():
+                self._match_existing_plan_trials(conn, plan["plan_id"], dict(plan))
             existing_subject_columns = {
                 row["name"] for row in conn.execute("PRAGMA table_info(subjects)").fetchall()
             }
@@ -193,25 +234,39 @@ class DatabaseManager:
         """Count trials for every Subject/position-combination pair."""
         with self.get_connection() as conn:
             rows = conn.execute(
-                """WITH combinations AS (
-                    SELECT DISTINCT stimulation_position AS position_combination
-                    FROM trials
-                    WHERE stimulation_position IS NOT NULL
-                      AND TRIM(stimulation_position) != ''
-                      AND (? IS NULL OR experiment_id = ?)
+                """WITH normalized_trials AS (
+                    SELECT t.*,
+                        CASE
+                            WHEN ABS(ABS(t.stimulation_high_level_v) - ABS(t.stimulation_low_level_v)) < 0.000000001
+                             AND ABS(t.stimulation_duty_cycle_pct - 50.0) < 0.000000001
+                             AND p1.code IS NOT NULL AND p2.code IS NOT NULL
+                            THEN CASE
+                                WHEN p1.code COLLATE NOCASE <= p2.code COLLATE NOCASE
+                                THEN p1.code || p2.code ELSE p2.code || p1.code
+                            END
+                            ELSE t.stimulation_position
+                        END AS normalized_position
+                    FROM trials t
+                    LEFT JOIN stimulation_positions p1 ON p1.position_id = t.stimulation_position_id
+                    LEFT JOIN stimulation_positions p2 ON p2.position_id = t.stimulation_position_2_id
+                    WHERE (? IS NULL OR t.experiment_id = ?)
+                ), combinations AS (
+                    SELECT DISTINCT normalized_position AS position_combination
+                    FROM normalized_trials
+                    WHERE normalized_position IS NOT NULL
+                      AND TRIM(normalized_position) != ''
                 )
                 SELECT s.subject_id, c.position_combination,
                     COUNT(DISTINCT t.trial_id) AS trial_count
                 FROM subjects s
                 CROSS JOIN combinations c
-                LEFT JOIN trials t
+                LEFT JOIN normalized_trials t
                   ON t.subject_id = s.subject_id
-                 AND t.stimulation_position = c.position_combination
-                 AND (? IS NULL OR t.experiment_id = ?)
+                 AND t.normalized_position = c.position_combination
                 GROUP BY s.subject_id, c.position_combination
                 ORDER BY s.subject_id COLLATE NOCASE,
                          c.position_combination COLLATE NOCASE""",
-                (experiment_id, experiment_id, experiment_id, experiment_id),
+                (experiment_id, experiment_id),
             ).fetchall()
             return [dict(row) for row in rows]
 
@@ -310,6 +365,139 @@ class DatabaseManager:
             )
             conn.commit()
             return cursor.rowcount > 0
+
+    def list_experiment_plans(self, experiment_id: int) -> List[Dict[str, Any]]:
+        query = """
+        SELECT p.plan_id, p.experiment_id, p.subject_id,
+               p.stimulation_position_id, p.stimulation_position_2_id,
+               p.stimulation_position, p.stimulation_voltage_v, p.stimulation_waveform,
+               p.stimulation_high_level_v, p.stimulation_low_level_v,
+               p.stimulation_duty_cycle_pct, p.stimulation_frequency_hz,
+               p.stimulation_duration_s, p.stimulation_count, p.stimulation_interval_s, p.trial_count,
+               p.created_at, r.code AS red_position_code, b.code AS black_position_code,
+               (SELECT COUNT(*) FROM trials t WHERE t.plan_id=p.plan_id AND t.status='COMPLETED') AS completed_trial_count
+        FROM experiment_plans p
+        JOIN stimulation_positions r ON r.position_id = p.stimulation_position_id
+        JOIN stimulation_positions b ON b.position_id = p.stimulation_position_2_id
+        WHERE p.experiment_id = ?
+        ORDER BY p.plan_id
+        """
+        with self.get_connection() as conn:
+            return [dict(row) for row in conn.execute(query, (experiment_id,)).fetchall()]
+
+    @staticmethod
+    def _is_symmetric_plan(data: Dict[str, Any]) -> bool:
+        try:
+            return (
+                abs(abs(float(data["stimulation_high_level_v"])) - abs(float(data["stimulation_low_level_v"]))) < 1e-9
+                and abs(float(data["stimulation_duty_cycle_pct"]) - 50.0) < 1e-9
+            )
+        except (KeyError, TypeError, ValueError):
+            return False
+
+    def _canonicalize_plan_positions(
+        self, conn: sqlite3.Connection, data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        if not self._is_symmetric_plan(data):
+            return data
+        positions = conn.execute(
+            "SELECT position_id, code FROM stimulation_positions WHERE position_id IN (?, ?)",
+            (data["stimulation_position_id"], data["stimulation_position_2_id"]),
+        ).fetchall()
+        by_id = {row["position_id"]: row["code"] for row in positions}
+        first_id = data["stimulation_position_id"]
+        second_id = data["stimulation_position_2_id"]
+        first_code = by_id.get(first_id)
+        second_code = by_id.get(second_id)
+        if first_code is None or second_code is None:
+            return data
+        ordered = sorted(((first_code, first_id), (second_code, second_id)), key=lambda item: (item[0].casefold(), item[1]))
+        return {
+            **data,
+            "stimulation_position_id": ordered[0][1],
+            "stimulation_position_2_id": ordered[1][1],
+            "stimulation_position": f"{ordered[0][0]}{ordered[1][0]}",
+        }
+
+    def _match_existing_plan_trials(
+        self,
+        conn: sqlite3.Connection,
+        plan_id: int,
+        data: Dict[str, Any],
+    ) -> None:
+        completed = conn.execute(
+            "SELECT COUNT(*) FROM trials WHERE plan_id=? AND status='COMPLETED'",
+            (plan_id,),
+        ).fetchone()[0]
+        remaining = max(0, int(data["trial_count"]) - completed)
+        if remaining == 0:
+            return
+        matches = conn.execute("""SELECT trial_id FROM trials WHERE plan_id IS NULL AND status='COMPLETED'
+            AND experiment_id=? AND subject_id=?
+            AND ((stimulation_position_id=? AND stimulation_position_2_id=?)
+              OR (?=1 AND stimulation_position_id=? AND stimulation_position_2_id=?))
+            AND stimulation_waveform=? AND stimulation_high_level_v=? AND stimulation_low_level_v=?
+            AND stimulation_duty_cycle_pct=? AND stimulation_frequency_hz=? AND stimulation_duration_s=?
+            AND stimulation_count=? AND stimulation_interval_s=? ORDER BY trial_id LIMIT ?""",
+            (
+                data["experiment_id"], data["subject_id"],
+                data["stimulation_position_id"], data["stimulation_position_2_id"],
+                int(self._is_symmetric_plan(data)),
+                data["stimulation_position_2_id"], data["stimulation_position_id"],
+                data["stimulation_waveform"], data["stimulation_high_level_v"],
+                data["stimulation_low_level_v"], data["stimulation_duty_cycle_pct"],
+                data["stimulation_frequency_hz"], data["stimulation_duration_s"],
+                data["stimulation_count"], data["stimulation_interval_s"], remaining,
+            ),
+        ).fetchall()
+        for match in matches:
+            conn.execute("UPDATE trials SET plan_id=? WHERE trial_id=?", (plan_id, match["trial_id"]))
+
+    def create_experiment_plan(self, data: Dict[str, Any]) -> int:
+        with self.get_connection() as conn:
+            data = self._canonicalize_plan_positions(conn, data)
+            keys = list(data.keys())
+            legacy = {row["name"] for row in conn.execute("PRAGMA table_info(experiment_plans)")}
+            if "red_position_id" in legacy:
+                data = {**data, "red_position_id": data["stimulation_position_id"], "black_position_id": data["stimulation_position_2_id"], "position_combination": data["stimulation_position"], "high_level_v": data["stimulation_high_level_v"], "low_level_v": data["stimulation_low_level_v"], "frequency_hz": data["stimulation_frequency_hz"], "completed_trial_count": 0}
+                keys = list(data.keys())
+            cursor = conn.execute(
+                f"INSERT INTO experiment_plans ({', '.join(keys)}) VALUES ({', '.join('?' for _ in keys)})",
+                tuple(data[key] for key in keys),
+            )
+            plan_id = cursor.lastrowid
+            self._match_existing_plan_trials(conn, plan_id, data)
+            conn.commit()
+            return plan_id
+
+    def delete_experiment_plan(self, plan_id: int) -> bool:
+        with self.get_connection() as conn:
+            conn.execute("UPDATE trials SET plan_id = NULL WHERE plan_id = ?", (plan_id,))
+            cursor = conn.execute("DELETE FROM experiment_plans WHERE plan_id = ?", (plan_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def update_experiment_plan(self, plan_id: int, data: Dict[str, Any]) -> bool:
+        with self.get_connection() as conn:
+            data = self._canonicalize_plan_positions(conn, data)
+            conn.execute("UPDATE trials SET plan_id=NULL WHERE plan_id=?", (plan_id,))
+            keys = [key for key in data if key != "experiment_id"]
+            cursor = conn.execute(
+                f"UPDATE experiment_plans SET {', '.join(f'{key}=?' for key in keys)} WHERE plan_id=? AND experiment_id=?",
+                tuple(data[key] for key in keys) + (plan_id, data["experiment_id"]),
+            )
+            if cursor.rowcount == 0:
+                conn.commit()
+                return False
+            self._match_existing_plan_trials(conn, plan_id, data)
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def complete_experiment_plan_trial(self, plan_id: int) -> None:
+        return None
+
+    def uncomplete_experiment_plan_trial(self, plan_id: int) -> None:
+        return None
 
     def upsert_subject(
         self,
@@ -509,7 +697,7 @@ class DatabaseManager:
 
     def insert_trial(self, trial_data: Dict[str, Any]) -> int:
         keys = [
-            "experiment_id", "subject_id", "trial_no", "video_id", "experiment_timestamp", "video_file",
+            "experiment_id", "plan_id", "subject_id", "trial_no", "video_id", "experiment_timestamp", "video_file",
             "stimulation_time", "stimulation_position_id", "stimulation_position_2_id",
             "stimulation_position", "stimulation_voltage_v",
             "stimulation_waveform", "stimulation_high_level_v",

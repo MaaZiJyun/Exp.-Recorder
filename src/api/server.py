@@ -280,18 +280,21 @@ class ExperimentController:
                 request.low_level_v,
                 request.duty_cycle_pct,
             )
-            if request.plan_id is not None:
-                plan = next((item for item in self.db.list_experiment_plans(request.experiment_id or 0) if item["plan_id"] == request.plan_id), None)
+            plan_id = request.plan_id
+            if plan_id is not None:
+                plan = next((item for item in self.db.list_experiment_plans(request.experiment_id or 0) if item["plan_id"] == plan_id), None)
                 if plan is None or plan["completed_trial_count"] >= plan["trial_count"]:
-                    raise ValueError("所选实验计划不存在或已完成。")
-                plan_positions = (plan["stimulation_position_id"], plan["stimulation_position_2_id"])
-                request_positions = (position["position_id"], position_2["position_id"])
-                positions_match = plan_positions == request_positions or (
-                    _is_symmetric_stimulation(request.high_level_v, request.low_level_v, request.duty_cycle_pct)
-                    and set(plan_positions) == set(request_positions)
-                )
-                if (plan["subject_id"] != subject_id or not positions_match or plan["stimulation_high_level_v"] != request.high_level_v or plan["stimulation_low_level_v"] != request.low_level_v or plan["stimulation_frequency_hz"] != request.frequency_hz):
-                    raise ValueError("当前 Trial 参数与下一条实验计划不一致。")
+                    # 计划不存在或已完成时，仍允许手动开始一次 Trial（不关联该计划）。
+                    plan_id = None
+                else:
+                    plan_positions = (plan["stimulation_position_id"], plan["stimulation_position_2_id"])
+                    request_positions = (position["position_id"], position_2["position_id"])
+                    positions_match = plan_positions == request_positions or (
+                        _is_symmetric_stimulation(request.high_level_v, request.low_level_v, request.duty_cycle_pct)
+                        and set(plan_positions) == set(request_positions)
+                    )
+                    if (plan["subject_id"] != subject_id or not positions_match or plan["stimulation_high_level_v"] != request.high_level_v or plan["stimulation_low_level_v"] != request.low_level_v or plan["stimulation_frequency_hz"] != request.frequency_hz):
+                        raise ValueError("当前 Trial 参数与下一条实验计划不一致。")
 
             subject = Subject(
                 subject_id=subject_id,
@@ -334,7 +337,7 @@ class ExperimentController:
             result = self.runner.run_trial(trial_config)
             with self._lock:
                 self._task_result = result.to_dict()
-                self._task_result["plan_id"] = request.plan_id
+                self._task_result["plan_id"] = plan_id
                 self._task_status = result.status
 
         threading.Thread(target=worker, name=f"trial-{task_id[:8]}", daemon=True).start()

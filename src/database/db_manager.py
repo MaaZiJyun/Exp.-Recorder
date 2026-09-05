@@ -240,6 +240,7 @@ class DatabaseManager:
                             WHEN ABS(ABS(t.stimulation_high_level_v) - ABS(t.stimulation_low_level_v)) < 0.000000001
                              AND ABS(t.stimulation_duty_cycle_pct - 50.0) < 0.000000001
                              AND p1.code IS NOT NULL AND p2.code IS NOT NULL
+                             AND t.stimulation_position IN (p1.code || p2.code, p2.code || p1.code)
                             THEN CASE
                                 WHEN p1.code COLLATE NOCASE <= p2.code COLLATE NOCASE
                                 THEN p1.code || p2.code ELSE p2.code || p1.code

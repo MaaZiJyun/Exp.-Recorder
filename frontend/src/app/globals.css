@@ -181,6 +181,8 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .statistics-panel { min-height: 520px; }
 .statistics-description { margin: -10px 0 0; color: var(--muted); font-size: 11px; }
 .subject-status-muted td, .subject-status-muted td strong, .subject-status-muted td button { color: #9ca3af !important; }
+.subject-status-muted td.subject-status-hungry { color: #dc2626 !important; }
+.subject-status-muted td.subject-status-fatigued { color: #f97316 !important; }
 .statistics-controls { display: flex; align-items: flex-end; gap: 12px; }
 .statistics-experiment-select { display: flex; min-width: 220px; flex-direction: column; gap: 5px; }
 .statistics-experiment-select > span { color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: .08em; }

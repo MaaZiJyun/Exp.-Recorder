@@ -25,6 +25,37 @@ CREATE TABLE IF NOT EXISTS subjects (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS boards (
+    board_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    model TEXT NOT NULL,
+    serial_number TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    wifi INTEGER NOT NULL DEFAULT 0 CHECK (wifi IN (0, 1)),
+    bluetooth INTEGER NOT NULL DEFAULT 0 CHECK (bluetooth IN (0, 1)),
+    usb INTEGER NOT NULL DEFAULT 0 CHECK (usb IN (0, 1)),
+    gpio_count INTEGER NOT NULL DEFAULT 0 CHECK (gpio_count >= 0),
+    working_voltage REAL NOT NULL CHECK (working_voltage >= 0),
+    status TEXT NOT NULL DEFAULT 'offline' CHECK (status IN ('online', 'offline', 'broken')),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS peripherals (
+    peripheral_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    type TEXT NOT NULL CHECK (type IN ('camera', 'imu', 'dac', 'motor', 'sensor')),
+    model TEXT NOT NULL,
+    board_id INTEGER NOT NULL,
+    interface_type TEXT NOT NULL CHECK (interface_type IN ('GPIO', 'I2C', 'SPI', 'UART', 'PWM')),
+    voltage REAL NOT NULL CHECK (voltage >= 0),
+    status TEXT NOT NULL DEFAULT 'offline' CHECK (status IN ('online', 'offline', 'broken')),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (board_id) REFERENCES boards(board_id) ON DELETE RESTRICT
+);
+
+CREATE INDEX IF NOT EXISTS idx_peripherals_board ON peripherals(board_id);
+
 CREATE TABLE IF NOT EXISTS experiment (
     experiment_id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT NOT NULL,
@@ -130,3 +161,38 @@ CREATE TABLE IF NOT EXISTS trials (
 
 CREATE INDEX IF NOT EXISTS idx_trials_subject ON trials(subject_id);
 CREATE INDEX IF NOT EXISTS idx_trials_video_id ON trials(video_id);
+
+-- Per-frame animal tracking data. A Trial owns one video and many points.
+CREATE TABLE IF NOT EXISTS tracking_points (
+    tracking_point_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    trial_id INTEGER NOT NULL,
+    video_id TEXT NOT NULL,
+    frame_no INTEGER NOT NULL,
+    timestamp TEXT NOT NULL,
+    x REAL NOT NULL,
+    y REAL NOT NULL,
+    heading REAL NOT NULL,
+    FOREIGN KEY (trial_id) REFERENCES trials(trial_id) ON DELETE CASCADE,
+    FOREIGN KEY (video_id) REFERENCES trials(video_id) ON DELETE CASCADE,
+    UNIQUE (trial_id, frame_no)
+);
+
+CREATE INDEX IF NOT EXISTS idx_tracking_points_trial ON tracking_points(trial_id, frame_no);
+CREATE INDEX IF NOT EXISTS idx_tracking_points_video ON tracking_points(video_id, frame_no);
+
+-- One response summary per Trial/Video.
+CREATE TABLE IF NOT EXISTS responses (
+    trial_id INTEGER PRIMARY KEY,
+    video_id TEXT NOT NULL UNIQUE,
+    latency_s REAL,
+    action TEXT,
+    travel_distance_mm REAL,
+    displacement_mm REAL,
+    mean_linear_speed_mm_s REAL,
+    cumulative_rotation_deg REAL,
+    net_rotation_deg REAL,
+    mean_angular_speed_deg_s REAL,
+    mean_angular_velocity_deg_s REAL,
+    FOREIGN KEY (trial_id) REFERENCES trials(trial_id) ON DELETE CASCADE,
+    FOREIGN KEY (video_id) REFERENCES trials(video_id) ON DELETE CASCADE
+);

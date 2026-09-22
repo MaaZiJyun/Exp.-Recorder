@@ -133,7 +133,7 @@ if [ "$BACKEND_READY" -ne 1 ]; then
   exit 1
 fi
 
-echo "[start] Next.js control panel → http://127.0.0.1:3000"
+echo "[start] Next.js control panel → http://127.0.0.1:3001"
 npm --prefix "$FRONTEND_DIR" run dev &
 FRONTEND_PID=$!
 
@@ -143,7 +143,7 @@ for _ in $(seq 1 60); do
     echo "A server exited before startup completed." >&2
     exit 1
   fi
-  if curl --fail --silent http://127.0.0.1:3000/backend/health >/dev/null 2>&1; then
+  if curl --fail --silent http://127.0.0.1:3001/backend/health >/dev/null 2>&1; then
     READY=1
     break
   fi
@@ -157,7 +157,7 @@ fi
 
 echo "[ready] Exp. Recorder is running. Press Ctrl+C to stop."
 if [ "$OPEN_BROWSER" -eq 1 ] && command -v open >/dev/null 2>&1; then
-  open http://127.0.0.1:3000
+  open http://127.0.0.1:3001
 fi
 
 while kill -0 "$BACKEND_PID" 2>/dev/null && kill -0 "$FRONTEND_PID" 2>/dev/null; do

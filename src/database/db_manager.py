@@ -140,6 +140,12 @@ class DatabaseManager:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_trials_position_2 ON trials(stimulation_position_2_id)"
             )
+            conn.execute("""INSERT OR IGNORE INTO responses
+                (trial_id, video_id, latency_s, action)
+                SELECT trial_id, video_id, response_latency_s, response_action
+                FROM trials
+                WHERE response_latency_s IS NOT NULL OR response_action IS NOT NULL
+            """)
             conn.commit()
 
     @staticmethod
@@ -165,6 +171,13 @@ class DatabaseManager:
     def _position_dict(row: sqlite3.Row) -> Dict[str, Any]:
         record = dict(row)
         record["mark"] = json.loads(record["mark"]) if record.get("mark") else None
+        return record
+
+    @staticmethod
+    def _board_dict(row: sqlite3.Row) -> Dict[str, Any]:
+        record = dict(row)
+        for field in ("wifi", "bluetooth", "usb"):
+            record[field] = bool(record[field])
         return record
 
     @staticmethod
@@ -580,6 +593,122 @@ class DatabaseManager:
             conn.commit()
             return cursor.rowcount > 0
 
+    def list_boards(self) -> List[Dict[str, Any]]:
+        with self.get_connection() as conn:
+            rows = conn.execute(
+                """SELECT b.*, COUNT(p.peripheral_id) AS peripheral_count
+                FROM boards b
+                LEFT JOIN peripherals p ON p.board_id = b.board_id
+                GROUP BY b.board_id
+                ORDER BY b.name COLLATE NOCASE, b.board_id"""
+            ).fetchall()
+            return [self._board_dict(row) for row in rows]
+
+    def get_board(self, board_id: int) -> Optional[Dict[str, Any]]:
+        with self.get_connection() as conn:
+            row = conn.execute(
+                """SELECT b.*, COUNT(p.peripheral_id) AS peripheral_count
+                FROM boards b
+                LEFT JOIN peripherals p ON p.board_id = b.board_id
+                WHERE b.board_id = ?
+                GROUP BY b.board_id""",
+                (board_id,),
+            ).fetchone()
+            return self._board_dict(row) if row else None
+
+    def create_board(self, data: Dict[str, Any]) -> int:
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """INSERT INTO boards
+                (name, model, serial_number, wifi, bluetooth, usb, gpio_count, working_voltage, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    data["name"], data["model"], data["serial_number"],
+                    data["wifi"], data["bluetooth"], data["usb"],
+                    data["gpio_count"], data["working_voltage"], data["status"],
+                ),
+            )
+            conn.commit()
+            return int(cursor.lastrowid)
+
+    def update_board(self, board_id: int, data: Dict[str, Any]) -> bool:
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """UPDATE boards SET name=?, model=?, serial_number=?, wifi=?, bluetooth=?,
+                usb=?, gpio_count=?, working_voltage=?, status=?, updated_at=CURRENT_TIMESTAMP
+                WHERE board_id=?""",
+                (
+                    data["name"], data["model"], data["serial_number"],
+                    data["wifi"], data["bluetooth"], data["usb"],
+                    data["gpio_count"], data["working_voltage"], data["status"], board_id,
+                ),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def delete_board(self, board_id: int) -> bool:
+        with self.get_connection() as conn:
+            cursor = conn.execute("DELETE FROM boards WHERE board_id = ?", (board_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def list_peripherals(self, board_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        query = """SELECT p.*, b.name AS board_name
+            FROM peripherals p JOIN boards b ON b.board_id = p.board_id"""
+        params: tuple[Any, ...] = ()
+        if board_id is not None:
+            query += " WHERE p.board_id = ?"
+            params = (board_id,)
+        query += " ORDER BY p.name COLLATE NOCASE, p.peripheral_id"
+        with self.get_connection() as conn:
+            return [dict(row) for row in conn.execute(query, params).fetchall()]
+
+    def get_peripheral(self, peripheral_id: int) -> Optional[Dict[str, Any]]:
+        with self.get_connection() as conn:
+            row = conn.execute(
+                """SELECT p.*, b.name AS board_name
+                FROM peripherals p JOIN boards b ON b.board_id = p.board_id
+                WHERE p.peripheral_id = ?""",
+                (peripheral_id,),
+            ).fetchone()
+            return dict(row) if row else None
+
+    def create_peripheral(self, data: Dict[str, Any]) -> int:
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """INSERT INTO peripherals
+                (name, type, model, board_id, interface_type, voltage, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    data["name"], data["type"], data["model"], data["board_id"],
+                    data["interface_type"], data["voltage"], data["status"],
+                ),
+            )
+            conn.commit()
+            return int(cursor.lastrowid)
+
+    def update_peripheral(self, peripheral_id: int, data: Dict[str, Any]) -> bool:
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """UPDATE peripherals SET name=?, type=?, model=?, board_id=?,
+                interface_type=?, voltage=?, status=?, updated_at=CURRENT_TIMESTAMP
+                WHERE peripheral_id=?""",
+                (
+                    data["name"], data["type"], data["model"], data["board_id"],
+                    data["interface_type"], data["voltage"], data["status"], peripheral_id,
+                ),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def delete_peripheral(self, peripheral_id: int) -> bool:
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                "DELETE FROM peripherals WHERE peripheral_id = ?", (peripheral_id,)
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
     def list_subjects(self) -> List[Dict[str, Any]]:
         query = """
         SELECT s.*, COUNT(t.trial_id) AS trial_count
@@ -737,6 +866,84 @@ class DatabaseManager:
             conn.commit()
             return cursor.rowcount > 0
 
+    def list_tracking_points(self, trial_id: int) -> List[Dict[str, Any]]:
+        with self.get_connection() as conn:
+            rows = conn.execute(
+                """SELECT tracking_point_id, trial_id, video_id, frame_no, timestamp, x, y, heading
+                   FROM tracking_points WHERE trial_id=? ORDER BY frame_no""",
+                (trial_id,),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def upsert_tracking_point(self, trial_id: int, point: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        with self.get_connection() as conn:
+            trial = conn.execute("SELECT video_id FROM trials WHERE trial_id=?", (trial_id,)).fetchone()
+            if trial is None:
+                return None
+            conn.execute(
+                """INSERT INTO tracking_points
+                    (trial_id, video_id, frame_no, timestamp, x, y, heading)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(trial_id, frame_no) DO UPDATE SET
+                    timestamp=excluded.timestamp, x=excluded.x,
+                    y=excluded.y, heading=excluded.heading""",
+                (trial_id, trial["video_id"], point["frame_no"], point["timestamp"], point["x"], point["y"], point["heading"]),
+            )
+            conn.commit()
+            row = conn.execute(
+                "SELECT tracking_point_id, trial_id, video_id, frame_no, timestamp, x, y, heading FROM tracking_points WHERE trial_id=? AND frame_no=?",
+                (trial_id, point["frame_no"]),
+            ).fetchone()
+            return dict(row) if row else None
+
+    def replace_tracking_points(self, trial_id: int, points: List[Dict[str, Any]]) -> Optional[List[Dict[str, Any]]]:
+        with self.get_connection() as conn:
+            trial = conn.execute("SELECT video_id FROM trials WHERE trial_id=?", (trial_id,)).fetchone()
+            if trial is None:
+                return None
+            conn.execute("DELETE FROM tracking_points WHERE trial_id=?", (trial_id,))
+            conn.executemany(
+                "INSERT INTO tracking_points (trial_id, video_id, frame_no, timestamp, x, y, heading) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                [(trial_id, trial["video_id"], p["frame_no"], p["timestamp"], p["x"], p["y"], p["heading"]) for p in points],
+            )
+            conn.commit()
+            rows = conn.execute(
+                "SELECT tracking_point_id, trial_id, video_id, frame_no, timestamp, x, y, heading FROM tracking_points WHERE trial_id=? ORDER BY frame_no",
+                (trial_id,),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def get_response(self, trial_id: int) -> Optional[Dict[str, Any]]:
+        with self.get_connection() as conn:
+            row = conn.execute("SELECT * FROM responses WHERE trial_id=?", (trial_id,)).fetchone()
+            return dict(row) if row else None
+
+    def upsert_response(self, trial_id: int, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        with self.get_connection() as conn:
+            trial = conn.execute("SELECT video_id FROM trials WHERE trial_id=?", (trial_id,)).fetchone()
+            if trial is None:
+                return None
+            conn.execute(
+                """INSERT INTO responses (
+                    trial_id, video_id, latency_s, action, travel_distance_mm,
+                    displacement_mm, mean_linear_speed_mm_s, cumulative_rotation_deg,
+                    net_rotation_deg, mean_angular_speed_deg_s, mean_angular_velocity_deg_s
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(trial_id) DO UPDATE SET
+                    video_id=excluded.video_id, latency_s=excluded.latency_s,
+                    action=excluded.action, travel_distance_mm=excluded.travel_distance_mm,
+                    displacement_mm=excluded.displacement_mm,
+                    mean_linear_speed_mm_s=excluded.mean_linear_speed_mm_s,
+                    cumulative_rotation_deg=excluded.cumulative_rotation_deg,
+                    net_rotation_deg=excluded.net_rotation_deg,
+                    mean_angular_speed_deg_s=excluded.mean_angular_speed_deg_s,
+                    mean_angular_velocity_deg_s=excluded.mean_angular_velocity_deg_s""",
+                (trial_id, trial["video_id"], data.get("latency_s"), data.get("action"), data.get("travel_distance_mm"), data.get("displacement_mm"), data.get("mean_linear_speed_mm_s"), data.get("cumulative_rotation_deg"), data.get("net_rotation_deg"), data.get("mean_angular_speed_deg_s"), data.get("mean_angular_velocity_deg_s")),
+            )
+            conn.commit()
+            row = conn.execute("SELECT * FROM responses WHERE trial_id=?", (trial_id,)).fetchone()
+            return dict(row) if row else None
+
     def update_trial(self, trial_id: int, trial_data: Dict[str, Any]) -> bool:
         """Update the editable fields of one trial while preserving its video identity."""
         allowed = (
@@ -796,6 +1003,11 @@ class DatabaseManager:
         with self.get_connection() as conn:
             cursor = conn.execute(query, tuple(params))
             return [dict(row) for row in cursor.fetchall()]
+
+    def get_trial(self, trial_id: int) -> Optional[Dict[str, Any]]:
+        with self.get_connection() as conn:
+            row = conn.execute("SELECT * FROM trials WHERE trial_id=?", (trial_id,)).fetchone()
+            return dict(row) if row else None
 
     def clear_all_data(self) -> Dict[str, int]:
         """Delete experiment records while deliberately leaving video files untouched."""

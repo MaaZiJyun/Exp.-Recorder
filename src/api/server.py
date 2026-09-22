@@ -13,7 +13,7 @@ import re
 import threading
 from concurrent.futures import ThreadPoolExecutor
 import uuid
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from fastapi import FastAPI, HTTPException, Query, Response, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -55,7 +55,33 @@ class AnnotationRequest(BaseModel):
 
     response_latency_s: Optional[float] = Field(default=None, ge=0)
     response_action: Optional[str] = Field(default=None, max_length=120)
-    response_degree: Optional[float] = None
+    response_degree: Optional[float] = Field(default=None, ge=0, le=4)
+
+
+class TrackingPointRequest(BaseModel):
+    video_id: Optional[str] = None
+    frame_no: int = Field(ge=0)
+    timestamp: str = Field(min_length=1, max_length=80)
+    x: float
+    y: float
+    heading: float
+
+
+class TrackingPointsRequest(BaseModel):
+    points: list[TrackingPointRequest]
+
+
+class ResponseSummaryRequest(BaseModel):
+    video_id: Optional[str] = None
+    latency_s: Optional[float] = Field(default=None, ge=0)
+    action: Optional[str] = Field(default=None, max_length=120)
+    travel_distance_mm: Optional[float] = Field(default=None, ge=0)
+    displacement_mm: Optional[float] = Field(default=None, ge=0)
+    mean_linear_speed_mm_s: Optional[float] = Field(default=None, ge=0)
+    cumulative_rotation_deg: Optional[float] = None
+    net_rotation_deg: Optional[float] = None
+    mean_angular_speed_deg_s: Optional[float] = Field(default=None, ge=0)
+    mean_angular_velocity_deg_s: Optional[float] = None
 
 
 class ExperimentRequest(BaseModel):
@@ -100,6 +126,32 @@ class SpeciesRequest(BaseModel):
     image: Optional[str] = Field(default=None, max_length=3_000_000)
     feeding_cycle_h: Optional[float] = Field(default=None, ge=0)
     rest_cycle_h: Optional[float] = Field(default=None, ge=0)
+
+
+class BoardRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    name: str = Field(min_length=1, max_length=200)
+    model: str = Field(min_length=1, max_length=200)
+    serial_number: str = Field(min_length=1, max_length=200)
+    wifi: bool = False
+    bluetooth: bool = False
+    usb: bool = False
+    gpio_count: int = Field(default=0, ge=0)
+    working_voltage: float = Field(ge=0)
+    status: Literal["online", "offline", "broken"] = "offline"
+
+
+class PeripheralRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    name: str = Field(min_length=1, max_length=200)
+    type: Literal["camera", "imu", "dac", "motor", "sensor"]
+    model: str = Field(min_length=1, max_length=200)
+    board_id: int = Field(ge=1)
+    interface_type: Literal["GPIO", "I2C", "SPI", "UART", "PWM"]
+    voltage: float = Field(ge=0)
+    status: Literal["online", "offline", "broken"] = "offline"
 
 
 class PositionMark(BaseModel):
@@ -188,7 +240,7 @@ class TrialUpdateRequest(BaseModel):
     stimulation_frequency_hz: float = Field(gt=0)
     response_latency_s: Optional[float] = Field(default=None, ge=0)
     response_action: Optional[str] = Field(default=None, max_length=120)
-    response_degree: Optional[float] = Field(default=None, ge=0, le=3)
+    response_degree: Optional[float] = Field(default=None, ge=0, le=4)
     status: str = Field(pattern="^(RUNNING|COMPLETED|FAILED|ABORTED)$")
 
 
@@ -361,6 +413,10 @@ class ExperimentController:
             result["response_action"] = annotation.response_action
             result["response_degree"] = annotation.response_degree
             trial_id = self.db.insert_trial(result)
+            self.db.upsert_response(trial_id, {
+                "latency_s": annotation.response_latency_s,
+                "action": annotation.response_action,
+            })
             if result.get("plan_id") is not None:
                 self.db.complete_experiment_plan_trial(int(result["plan_id"]))
             result["trial_id"] = trial_id
@@ -421,7 +477,7 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
     app.state.controller = controller
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+        allow_origins=["http://localhost:3001", "http://127.0.0.1:3001"],
         allow_credentials=False,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
         allow_headers=["Content-Type"],
@@ -466,6 +522,75 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
             return controller.connect_devices()
         except RuntimeError as exc:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+    @app.get("/api/boards")
+    def boards() -> list[dict[str, Any]]:
+        return controller.db.list_boards()
+
+    @app.post("/api/boards", status_code=status.HTTP_201_CREATED)
+    def create_board(request: BoardRequest) -> dict[str, Any]:
+        try:
+            board_id = controller.db.create_board(request.model_dump())
+        except Exception as exc:
+            if "UNIQUE constraint failed" in str(exc):
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Serial Number already exists") from exc
+            raise
+        record = controller.db.get_board(board_id)
+        assert record is not None
+        return record
+
+    @app.put("/api/boards/{board_id}")
+    def update_board(board_id: int, request: BoardRequest) -> dict[str, Any]:
+        try:
+            updated = controller.db.update_board(board_id, request.model_dump())
+        except Exception as exc:
+            if "UNIQUE constraint failed" in str(exc):
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Serial Number already exists") from exc
+            raise
+        if not updated:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Board not found")
+        record = controller.db.get_board(board_id)
+        assert record is not None
+        return record
+
+    @app.delete("/api/boards/{board_id}")
+    def delete_board(board_id: int) -> dict[str, bool]:
+        record = controller.db.get_board(board_id)
+        if record is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Board not found")
+        if record["peripheral_count"]:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Board still has peripherals")
+        controller.db.delete_board(board_id)
+        return {"deleted": True}
+
+    @app.get("/api/peripherals")
+    def peripherals(board_id: Optional[int] = Query(default=None, ge=1)) -> list[dict[str, Any]]:
+        return controller.db.list_peripherals(board_id)
+
+    @app.post("/api/peripherals", status_code=status.HTTP_201_CREATED)
+    def create_peripheral(request: PeripheralRequest) -> dict[str, Any]:
+        if controller.db.get_board(request.board_id) is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Board not found")
+        peripheral_id = controller.db.create_peripheral(request.model_dump())
+        record = controller.db.get_peripheral(peripheral_id)
+        assert record is not None
+        return record
+
+    @app.put("/api/peripherals/{peripheral_id}")
+    def update_peripheral(peripheral_id: int, request: PeripheralRequest) -> dict[str, Any]:
+        if controller.db.get_board(request.board_id) is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Board not found")
+        if not controller.db.update_peripheral(peripheral_id, request.model_dump()):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Peripheral not found")
+        record = controller.db.get_peripheral(peripheral_id)
+        assert record is not None
+        return record
+
+    @app.delete("/api/peripherals/{peripheral_id}")
+    def delete_peripheral(peripheral_id: int) -> dict[str, bool]:
+        if not controller.db.delete_peripheral(peripheral_id):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Peripheral not found")
+        return {"deleted": True}
 
     @app.get("/api/subjects")
     def subjects() -> list[dict[str, Any]]:
@@ -799,6 +924,39 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
         media_type = "video/webm" if video_path.suffix.lower() == ".webm" else "video/x-msvideo"
         return FileResponse(video_path, media_type=media_type, filename=video_path.name)
 
+    @app.get("/api/trials/{trial_id}/tracking")
+    def trial_tracking(trial_id: int) -> list[dict[str, Any]]:
+        if controller.db.get_trial(trial_id) is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trial not found")
+        return controller.db.list_tracking_points(trial_id)
+
+    @app.post("/api/trials/{trial_id}/tracking")
+    def add_tracking_point(trial_id: int, request: TrackingPointRequest) -> dict[str, Any]:
+        point = controller.db.upsert_tracking_point(trial_id, request.model_dump(exclude={"video_id"}))
+        if point is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trial not found")
+        return point
+
+    @app.put("/api/trials/{trial_id}/tracking")
+    def replace_tracking(trial_id: int, request: TrackingPointsRequest) -> list[dict[str, Any]]:
+        points = controller.db.replace_tracking_points(trial_id, [item.model_dump(exclude={"video_id"}) for item in request.points])
+        if points is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trial not found")
+        return points
+
+    @app.get("/api/trials/{trial_id}/response")
+    def trial_response(trial_id: int) -> dict[str, Any]:
+        if controller.db.get_trial(trial_id) is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trial not found")
+        return controller.db.get_response(trial_id) or {}
+
+    @app.put("/api/trials/{trial_id}/response")
+    def update_trial_response_summary(trial_id: int, request: ResponseSummaryRequest) -> dict[str, Any]:
+        response = controller.db.upsert_response(trial_id, request.model_dump(exclude={"video_id"}))
+        if response is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trial not found")
+        return response
+
     @app.get("/api/pending-trial/video")
     def pending_trial_video() -> FileResponse:
         current = controller.current_task()
@@ -881,6 +1039,10 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
         )
         if not updated:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trial not found")
+        controller.db.upsert_response(trial_id, {
+            "latency_s": request.response_latency_s,
+            "action": request.response_action,
+        })
         return {"updated": True}
 
     @app.put("/api/trials/{trial_id}")

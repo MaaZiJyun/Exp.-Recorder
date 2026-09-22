@@ -7,6 +7,38 @@ export type DeviceStatus = {
   camera_error: string | null;
 };
 
+export type HardwareStatus = "online" | "offline" | "broken";
+
+export type Board = {
+  board_id: number;
+  name: string;
+  model: string;
+  serial_number: string;
+  wifi: boolean;
+  bluetooth: boolean;
+  usb: boolean;
+  gpio_count: number;
+  working_voltage: number;
+  status: HardwareStatus;
+  peripheral_count: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type Peripheral = {
+  peripheral_id: number;
+  name: string;
+  type: "camera" | "imu" | "dac" | "motor" | "sensor";
+  model: string;
+  board_id: number;
+  board_name: string;
+  interface_type: "GPIO" | "I2C" | "SPI" | "UART" | "PWM";
+  voltage: number;
+  status: HardwareStatus;
+  created_at: string;
+  updated_at: string;
+};
+
 export type Trial = {
   trial_id: number | null;
   experiment_id: number | null;

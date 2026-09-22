@@ -62,7 +62,7 @@ export function ExecuteView({ ctx }: { ctx: RecorderContext }) {
 
   return (
     <>
-      <section className="flex w-full flex-col gap-4 rounded-2xl border border-zinc-200 bg-zinc-50 p-4 xl:flex-row xl:items-end xl:justify-between xl:px-5">
+      <section id="signal-generation" className="scroll-mt-6 flex w-full flex-col gap-4 rounded-2xl border border-zinc-200 bg-zinc-50 p-4 xl:flex-row xl:items-end xl:justify-between xl:px-5">
         <div className="flex items-end gap-x-6 gap-y-3">
           <div>
             <p className="mb-1 text-sm font-medium uppercase">
@@ -310,7 +310,7 @@ export function ExecuteView({ ctx }: { ctx: RecorderContext }) {
         </div>
       </Dialog>
 
-      <section className="dashboard-grid execute-layout">
+      <section id="live-control" className="dashboard-grid execute-layout scroll-mt-6">
         <aside className="left-column">
           {pendingTrial && (
             <div className="">
@@ -652,7 +652,7 @@ export function ExecuteView({ ctx }: { ctx: RecorderContext }) {
         </section>
       </section>
 
-      <section className="panel run-panel run-footer-panel">
+      <section id="experiment-logs" className="panel run-panel run-footer-panel scroll-mt-6">
         <div className="run-summary">
           <div>
             <p>CURRENT RUN</p>

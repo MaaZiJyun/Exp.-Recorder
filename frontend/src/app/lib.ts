@@ -22,7 +22,30 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     let message = `请求失败 (${response.status})`;
     try {
       const body = await response.json();
-      message = body.detail ?? message;
+      // FastAPI validation errors are arrays of objects. Interpolating those
+      // directly produces the unhelpful "[object Object]" in the UI.
+      const formatDetail = (detail: unknown): string => {
+        if (typeof detail === "string") return detail;
+        if (Array.isArray(detail)) {
+          const items = detail.map((item) => formatDetail(item)).filter(Boolean);
+          return items.join("；");
+        }
+        if (detail && typeof detail === "object") {
+          const item = detail as Record<string, unknown>;
+          const location = Array.isArray(item.loc)
+            ? ` (${item.loc.join(".")})`
+            : "";
+          if (typeof item.msg === "string") return `${item.msg}${location}`;
+          try {
+            return JSON.stringify(detail);
+          } catch {
+            return "请求参数无效";
+          }
+        }
+        return "";
+      };
+      const detail = body && typeof body === "object" ? body.detail : body;
+      message = formatDetail(detail) || message;
     } catch {
       // Keep the HTTP fallback message.
     }

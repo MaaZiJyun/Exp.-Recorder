@@ -117,7 +117,7 @@ cd ..
 ./start.sh --no-open
 ```
 
-浏览器访问 [http://localhost:3000](http://localhost:3000)。Next.js 会把 `/backend/*` 请求代理到 `http://127.0.0.1:8000`；如需使用其他 API 地址，可设置 `EXP_RECORDER_API_URL`。
+浏览器访问 [http://localhost:3001](http://localhost:3001)。Next.js 会把 `/backend/*` 请求代理到 `http://127.0.0.1:8000`；如需使用其他 API 地址，可设置 `EXP_RECORDER_API_URL`。
 
 **Web 控制台功能：**
 

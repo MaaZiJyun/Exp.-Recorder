@@ -6,6 +6,7 @@ import type { Board, HardwareStatus, Peripheral } from "@/app/types";
 import { api } from "@/app/lib";
 import { PageHeader, SectionHeader } from "@/components/circo/page-elements";
 import { Alert, Badge, Button, Card, Dialog, EmptyState, Field, Input, Select } from "@/components/circo/ui";
+import { HardwareHealthDialog } from "@/components/circo/pages/hardware-health-dialog";
 
 type BoardDraft = {
   name: string;
@@ -50,6 +51,7 @@ export function HardwarePage() {
   const [peripheralEditorId, setPeripheralEditorId] = useState<number | null | undefined>(undefined);
   const [boardDraft, setBoardDraft] = useState<BoardDraft>(emptyBoard);
   const [peripheralDraft, setPeripheralDraft] = useState<PeripheralDraft>(emptyPeripheral);
+  const [healthBoard, setHealthBoard] = useState<Board | null>(null);
 
   const loadHardware = useCallback(async () => {
     setLoading(true);
@@ -115,12 +117,12 @@ export function HardwarePage() {
   };
 
   return <div className="grid gap-8">
-    <PageHeader eyebrow="资源" title="硬件" subtitle="管理实验主板与连接到主板的外接设备。" />
+    <PageHeader eyebrow="资源" title="硬件" subtitle="管理库存主板与连接到主板的外接设备。" />
     {message && <Alert tone={message.kind}>{message.text}</Alert>}
 
     <Card>
       <SectionHeader title="主板" subtitle={`${boards.length} 块主板`} action={<Button onClick={openNewBoard}><PlusIcon className="size-4" />新增主板</Button>} />
-      {loading ? <p className="py-10 text-center text-sm text-zinc-500">加载中…</p> : boards.length === 0 ? <EmptyState title="暂无主板" description="先创建主板，再为其添加外接设备。" action={<Button onClick={openNewBoard}>新增主板</Button>} /> : <div className="table-wrap"><table><thead><tr><th>ID</th><th>名称</th><th>型号</th><th>Serial Number</th><th>连接能力</th><th>GPIO</th><th>工作电压</th><th>状态</th><th>外设</th><th>创建/更新</th><th>操作</th></tr></thead><tbody>{boards.map((board) => <tr key={board.board_id}><td>{board.board_id}</td><td><strong>{board.name}</strong></td><td>{board.model}</td><td className="font-mono text-xs">{board.serial_number}</td><td>{[board.wifi && "Wi-Fi", board.bluetooth && "Bluetooth", board.usb && "USB"].filter(Boolean).join(" / ") || "—"}</td><td>{board.gpio_count}</td><td>{board.working_voltage} V</td><td><StatusBadge value={board.status} /></td><td>{board.peripheral_count}</td><td className="whitespace-nowrap text-xs text-zinc-500">{dateTime(board.created_at)}<br />{dateTime(board.updated_at)}</td><td className="whitespace-nowrap"><button type="button" onClick={() => editBoard(board)}>编辑</button> <button type="button" className="row-delete" onClick={() => void removeBoard(board)}>删除</button></td></tr>)}</tbody></table></div>}
+      {loading ? <p className="py-10 text-center text-sm text-zinc-500">加载中…</p> : boards.length === 0 ? <EmptyState title="暂无主板" description="先创建主板，再为其添加外接设备。" action={<Button onClick={openNewBoard}>新增主板</Button>} /> : <div className="table-wrap"><table><thead><tr><th>ID</th><th>名称</th><th>型号</th><th>Serial Number</th><th>连接能力</th><th>GPIO</th><th>工作电压</th><th>状态</th><th>外设</th><th>创建/更新</th><th>操作</th></tr></thead><tbody>{boards.map((board) => <tr key={board.board_id}><td>{board.board_id}</td><td><strong>{board.name}</strong></td><td>{board.model}</td><td className="font-mono text-xs">{board.serial_number}</td><td>{[board.wifi && "Wi-Fi", board.bluetooth && "Bluetooth", board.usb && "USB"].filter(Boolean).join(" / ") || "—"}</td><td>{board.gpio_count}</td><td>{board.working_voltage} V</td><td><StatusBadge value={board.status} /></td><td>{board.peripheral_count}</td><td className="whitespace-nowrap text-xs text-zinc-500">{dateTime(board.created_at)}<br />{dateTime(board.updated_at)}</td><td className="whitespace-nowrap"><button type="button" onClick={() => setHealthBoard(board)}>体检</button> <button type="button" onClick={() => editBoard(board)}>编辑</button> <button type="button" className="row-delete" onClick={() => void removeBoard(board)}>删除</button></td></tr>)}</tbody></table></div>}
     </Card>
 
     <Card>
@@ -146,5 +148,6 @@ export function HardwarePage() {
         <div className="flex justify-end gap-2"><Button type="button" variant="secondary" onClick={() => setPeripheralEditorId(undefined)}>取消</Button><Button type="submit" disabled={saving}>{saving ? "保存中…" : "保存"}</Button></div>
       </form>
     </Dialog>
+    <HardwareHealthDialog board={healthBoard} onClose={() => setHealthBoard(null)} />
   </div>;
 }

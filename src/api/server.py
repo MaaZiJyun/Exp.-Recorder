@@ -26,6 +26,7 @@ from src.core.trial_runner import TrialRunner
 from src.database.db_manager import DatabaseManager
 from src.devices.sdg1022x import SDG1022XDriver
 from src.devices.xiao_camera import XiaoCameraDriver
+from src.devices.xiao_healthcheck import XiaoESP32S3HealthCheck
 
 
 class TrialRequest(BaseModel):
@@ -152,6 +153,20 @@ class PeripheralRequest(BaseModel):
     interface_type: Literal["GPIO", "I2C", "SPI", "UART", "PWM"]
     voltage: float = Field(ge=0)
     status: Literal["online", "offline", "broken"] = "offline"
+
+
+class XiaoHealthStartRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    port: str = Field(min_length=1, max_length=500)
+    flash: bool = True
+
+
+class XiaoHealthTestRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    port: str = Field(min_length=1, max_length=500)
+    test: Literal["gpio", "pwm", "uart", "spi", "i2c"]
 
 
 class PositionMark(BaseModel):
@@ -463,6 +478,8 @@ class ExperimentController:
 
 def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
     controller = ExperimentController(mock=mock, db_path=db_path)
+    health_jobs: dict[str, dict[str, Any]] = {}
+    health_jobs_lock = threading.Lock()
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -591,6 +608,111 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
         if not controller.db.delete_peripheral(peripheral_id):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Peripheral not found")
         return {"deleted": True}
+
+    def ensure_inventory_port(port: str) -> None:
+        experiment_port = controller.camera.port if controller.camera.is_connected else None
+        if experiment_port and port == experiment_port:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="该串口正由实验台 XIAO 使用；库存体检不会占用或断开实验设备。",
+            )
+        discovered_ports = {item.device for item in XiaoESP32S3HealthCheck.discover()}
+        if port not in discovered_ports:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="所选库存板 USB 端口不存在，请重新扫描。",
+            )
+
+    @app.get("/api/hardware-health/xiao/ports")
+    def xiao_health_ports() -> dict[str, Any]:
+        checker = XiaoESP32S3HealthCheck()
+        experiment_port = controller.camera.port if controller.camera.is_connected else None
+        return {
+            "ports": [
+                {**item.to_dict(), "reserved_by_experiment": item.device == experiment_port}
+                for item in checker.discover()
+            ],
+            "arduino_cli_available": checker.arduino_cli is not None,
+        }
+
+    @app.post("/api/boards/{board_id}/health/xiao/start", status_code=status.HTTP_202_ACCEPTED)
+    def start_xiao_health(board_id: int, request: XiaoHealthStartRequest) -> dict[str, Any]:
+        board = controller.db.get_board(board_id)
+        if board is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Board not found")
+        ensure_inventory_port(request.port)
+        job_id = uuid.uuid4().hex
+        now = datetime.now().isoformat(timespec="seconds")
+        job: dict[str, Any] = {
+            "job_id": job_id,
+            "status": "queued",
+            "stage": "queued",
+            "message": "体检任务已进入后台队列。",
+            "logs": [{"timestamp": now, "stage": "queued", "message": "体检任务已进入后台队列。"}],
+            "result": None,
+        }
+        with health_jobs_lock:
+            health_jobs[job_id] = job
+
+        def report(stage: str, message: str) -> None:
+            entry = {
+                "timestamp": datetime.now().isoformat(timespec="seconds"),
+                "stage": stage,
+                "message": message,
+            }
+            with health_jobs_lock:
+                current = health_jobs[job_id]
+                current["stage"] = stage
+                current["message"] = message
+                current["logs"].append(entry)
+                current["logs"] = current["logs"][-200:]
+
+        def run_health_check() -> None:
+            with health_jobs_lock:
+                health_jobs[job_id]["status"] = "running"
+            try:
+                checker = XiaoESP32S3HealthCheck()
+                result = checker.initial_checks(
+                    request.port,
+                    flash=request.flash,
+                    progress=report,
+                )
+                result.update(
+                    {
+                        "board": board,
+                        "peripherals": controller.db.list_peripherals(board_id),
+                    }
+                )
+                with health_jobs_lock:
+                    current = health_jobs[job_id]
+                    current["status"] = "completed"
+                    current["result"] = result
+            except Exception as exc:
+                report("failed", f"体检任务失败：{exc}")
+                with health_jobs_lock:
+                    health_jobs[job_id]["status"] = "failed"
+
+        threading.Thread(target=run_health_check, daemon=True).start()
+        with health_jobs_lock:
+            return {**health_jobs[job_id], "logs": list(health_jobs[job_id]["logs"])}
+
+    @app.get("/api/hardware-health/jobs/{job_id}")
+    def xiao_health_job(job_id: str) -> dict[str, Any]:
+        with health_jobs_lock:
+            job = health_jobs.get(job_id)
+            if job is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Health-check job not found")
+            return {**job, "logs": list(job["logs"])}
+
+    @app.post("/api/boards/{board_id}/health/xiao/test")
+    def run_xiao_health_test(board_id: int, request: XiaoHealthTestRequest) -> dict[str, Any]:
+        if controller.db.get_board(board_id) is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Board not found")
+        ensure_inventory_port(request.port)
+        try:
+            return XiaoESP32S3HealthCheck().run_interface_test(request.port, request.test)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
     @app.get("/api/subjects")
     def subjects() -> list[dict[str, Any]]:

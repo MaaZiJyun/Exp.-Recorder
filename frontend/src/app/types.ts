@@ -39,6 +39,52 @@ export type Peripheral = {
   updated_at: string;
 };
 
+export type XiaoSerialPort = {
+  device: string;
+  product: string | null;
+  manufacturer: string | null;
+  serial_number: string | null;
+  vid: number | null;
+  pid: number | null;
+  hwid: string | null;
+  reserved_by_experiment: boolean;
+};
+
+export type XiaoHealthResult = {
+  passed: boolean;
+  skipped?: boolean;
+  test?: string;
+  detail: string | Record<string, unknown>;
+  raw?: string;
+  product?: string;
+  hardware_mac?: string | null;
+  wifi?: boolean;
+  bluetooth?: boolean;
+};
+
+export type XiaoHealthStep = {
+  id: "gpio" | "pwm" | "uart" | "spi" | "i2c";
+  title: string;
+  instruction: string;
+};
+
+export type XiaoHealthSession = {
+  port: string;
+  board: Board;
+  checks: Record<string, XiaoHealthResult>;
+  steps: XiaoHealthStep[];
+  peripherals: Peripheral[];
+};
+
+export type XiaoHealthJob = {
+  job_id: string;
+  status: "queued" | "running" | "completed" | "failed";
+  stage: string;
+  message: string;
+  logs: Array<{ timestamp: string; stage: string; message: string }>;
+  result: XiaoHealthSession | null;
+};
+
 export type Trial = {
   trial_id: number | null;
   experiment_id: number | null;

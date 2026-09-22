@@ -18,7 +18,7 @@ import { useRecorder } from "./use-recorder";
 export default function Home() {
   const ctx = useRecorder();
   const { devices, ready, changeSection, changeWorkspace } = ctx;
-  const [activePage, setActivePage] = useState<PageId>("live-control");
+  const [activePage, setActivePage] = useState<PageId>("signal-generation");
 
   const changePage = (page: PageId) => {
     setActivePage(page);
@@ -42,7 +42,7 @@ export default function Home() {
     plans: <PlansPage ctx={ctx} />,
     trials: <TrialsPage ctx={ctx} />,
     "signal-generation": <SignalGenerationPage ctx={ctx} />,
-    "live-control": <LiveControlPage ctx={ctx} />,
+    "live-control": <LiveControlPage />,
     logs: <LogsPage ctx={ctx} />,
   } satisfies Record<PageId, React.ReactNode>;
 

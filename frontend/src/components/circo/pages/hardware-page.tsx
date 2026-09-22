@@ -11,10 +11,7 @@ import { HardwareHealthDialog } from "@/components/circo/pages/hardware-health-d
 type BoardDraft = {
   name: string;
   model: string;
-  serial_number: string;
-  wifi: boolean;
-  bluetooth: boolean;
-  usb: boolean;
+  mac: string;
   gpio_count: string;
   working_voltage: string;
   status: HardwareStatus;
@@ -30,11 +27,16 @@ type PeripheralDraft = {
   status: HardwareStatus;
 };
 
-const emptyBoard: BoardDraft = { name: "", model: "", serial_number: "", wifi: false, bluetooth: false, usb: false, gpio_count: "0", working_voltage: "3.3", status: "offline" };
+const emptyBoard: BoardDraft = { name: "", model: "", mac: "", gpio_count: "0", working_voltage: "3.3", status: "offline" };
 const emptyPeripheral: PeripheralDraft = { name: "", type: "sensor", model: "", board_id: "", interface_type: "GPIO", voltage: "3.3", status: "offline" };
 
 function StatusBadge({ value }: { value: HardwareStatus }) {
   return <Badge tone={value === "online" ? "success" : value === "broken" ? "danger" : "neutral"}>{value.toUpperCase()}</Badge>;
+}
+
+function HealthValue({ value }: { value: boolean | null }) {
+  if (value === null) return <span className="text-zinc-400">—</span>;
+  return <span className={value ? "text-green-700" : "text-red-700"}>{value ? "True" : "False"}</span>;
 }
 
 function dateTime(value: string) {
@@ -76,7 +78,7 @@ export function HardwarePage() {
 
   const openNewBoard = () => { setBoardDraft(emptyBoard); setBoardEditorId(null); };
   const editBoard = (board: Board) => {
-    setBoardDraft({ name: board.name, model: board.model, serial_number: board.serial_number, wifi: Boolean(board.wifi), bluetooth: Boolean(board.bluetooth), usb: Boolean(board.usb), gpio_count: String(board.gpio_count), working_voltage: String(board.working_voltage), status: board.status });
+    setBoardDraft({ name: board.name, model: board.model, mac: board.mac, gpio_count: String(board.gpio_count), working_voltage: String(board.working_voltage), status: board.status });
     setBoardEditorId(board.board_id);
   };
   const saveBoard = async () => {
@@ -122,7 +124,7 @@ export function HardwarePage() {
 
     <Card>
       <SectionHeader title="主板" subtitle={`${boards.length} 块主板`} action={<Button onClick={openNewBoard}><PlusIcon className="size-4" />新增主板</Button>} />
-      {loading ? <p className="py-10 text-center text-sm text-zinc-500">加载中…</p> : boards.length === 0 ? <EmptyState title="暂无主板" description="先创建主板，再为其添加外接设备。" action={<Button onClick={openNewBoard}>新增主板</Button>} /> : <div className="table-wrap"><table><thead><tr><th>ID</th><th>名称</th><th>型号</th><th>Serial Number</th><th>连接能力</th><th>GPIO</th><th>工作电压</th><th>状态</th><th>外设</th><th>创建/更新</th><th>操作</th></tr></thead><tbody>{boards.map((board) => <tr key={board.board_id}><td>{board.board_id}</td><td><strong>{board.name}</strong></td><td>{board.model}</td><td className="font-mono text-xs">{board.serial_number}</td><td>{[board.wifi && "Wi-Fi", board.bluetooth && "Bluetooth", board.usb && "USB"].filter(Boolean).join(" / ") || "—"}</td><td>{board.gpio_count}</td><td>{board.working_voltage} V</td><td><StatusBadge value={board.status} /></td><td>{board.peripheral_count}</td><td className="whitespace-nowrap text-xs text-zinc-500">{dateTime(board.created_at)}<br />{dateTime(board.updated_at)}</td><td className="whitespace-nowrap"><button type="button" onClick={() => setHealthBoard(board)}>体检</button> <button type="button" onClick={() => editBoard(board)}>编辑</button> <button type="button" className="row-delete" onClick={() => void removeBoard(board)}>删除</button></td></tr>)}</tbody></table></div>}
+      {loading ? <p className="py-10 text-center text-sm text-zinc-500">加载中…</p> : boards.length === 0 ? <EmptyState title="暂无主板" description="先创建主板，再为其添加外接设备。" action={<Button onClick={openNewBoard}>新增主板</Button>} /> : <div className="table-wrap"><table><thead><tr><th>ID</th><th>名称</th><th>型号</th><th>MAC</th><th>GPIO</th><th>工作电压</th><th>状态</th><th>体检结果</th><th>外设</th><th>创建/更新</th><th>操作</th></tr></thead><tbody>{boards.map((board) => <tr key={board.board_id}><td>{board.board_id}</td><td><strong>{board.name}</strong></td><td>{board.model}</td><td className="font-mono text-xs">{board.mac}</td><td>{board.gpio_count}</td><td>{board.working_voltage} V</td><td><StatusBadge value={board.status} /></td><td className="min-w-64 text-xs"><div className="grid grid-cols-2 gap-x-3 gap-y-1"><span>USB：<HealthValue value={board.health_usb_detected} /></span><span>Hello：<HealthValue value={board.health_hello} /></span><span>Wi-Fi：<HealthValue value={board.health_wifi} /></span><span>Bluetooth：<HealthValue value={board.health_bluetooth} /></span><span>GPIO：<HealthValue value={board.health_gpio} /></span><span>PWM：<HealthValue value={board.health_pwm} /></span><span>UART：<HealthValue value={board.health_uart} /></span><span>SPI：<HealthValue value={board.health_spi} /></span></div>{board.health_checked_at && <p className="mt-2 text-zinc-400">{dateTime(board.health_checked_at)}</p>}</td><td>{board.peripheral_count}</td><td className="whitespace-nowrap text-xs text-zinc-500">{dateTime(board.created_at)}<br />{dateTime(board.updated_at)}</td><td className="whitespace-nowrap"><button type="button" onClick={() => setHealthBoard(board)}>体检</button> <button type="button" onClick={() => editBoard(board)}>编辑</button> <button type="button" className="row-delete" onClick={() => void removeBoard(board)}>删除</button></td></tr>)}</tbody></table></div>}
     </Card>
 
     <Card>
@@ -133,9 +135,8 @@ export function HardwarePage() {
     <Dialog open={boardEditorId !== undefined} title={boardEditorId === null ? "新增主板" : "编辑主板"} closeLabel="关闭" onClose={() => setBoardEditorId(undefined)}>
       <form className="grid gap-4" onSubmit={(event) => { event.preventDefault(); void saveBoard(); }}>
         <div className="grid gap-4 sm:grid-cols-2"><Field label="名称"><Input required value={boardDraft.name} onChange={(event) => setBoardDraft((value) => ({ ...value, name: event.target.value }))} /></Field><Field label="型号"><Input required value={boardDraft.model} onChange={(event) => setBoardDraft((value) => ({ ...value, model: event.target.value }))} /></Field></div>
-        <Field label="Serial Number"><Input required value={boardDraft.serial_number} onChange={(event) => setBoardDraft((value) => ({ ...value, serial_number: event.target.value }))} /></Field>
+        <Field label="MAC"><Input required value={boardDraft.mac} onChange={(event) => setBoardDraft((value) => ({ ...value, mac: event.target.value }))} /></Field>
         <div className="grid gap-4 sm:grid-cols-3"><Field label="GPIO 数量"><Input required min="0" type="number" value={boardDraft.gpio_count} onChange={(event) => setBoardDraft((value) => ({ ...value, gpio_count: event.target.value }))} /></Field><Field label="工作电压 (V)"><Input required min="0" step="any" type="number" value={boardDraft.working_voltage} onChange={(event) => setBoardDraft((value) => ({ ...value, working_voltage: event.target.value }))} /></Field><Field label="状态"><Select value={boardDraft.status} onChange={(event) => setBoardDraft((value) => ({ ...value, status: event.target.value as HardwareStatus }))}><option value="online">Online</option><option value="offline">Offline</option><option value="broken">Broken</option></Select></Field></div>
-        <fieldset className="flex flex-wrap gap-5 rounded-xl border border-zinc-200 p-4"><legend className="px-1 text-sm font-medium">连接能力</legend>{([['wifi', 'Wi-Fi'], ['bluetooth', 'Bluetooth'], ['usb', 'USB']] as const).map(([key, label]) => <label className="flex items-center gap-2 text-sm" key={key}><input type="checkbox" checked={boardDraft[key]} onChange={(event) => setBoardDraft((value) => ({ ...value, [key]: event.target.checked }))} />{label}</label>)}</fieldset>
         <div className="flex justify-end gap-2"><Button type="button" variant="secondary" onClick={() => setBoardEditorId(undefined)}>取消</Button><Button type="submit" disabled={saving}>{saving ? "保存中…" : "保存"}</Button></div>
       </form>
     </Dialog>
@@ -148,6 +149,6 @@ export function HardwarePage() {
         <div className="flex justify-end gap-2"><Button type="button" variant="secondary" onClick={() => setPeripheralEditorId(undefined)}>取消</Button><Button type="submit" disabled={saving}>{saving ? "保存中…" : "保存"}</Button></div>
       </form>
     </Dialog>
-    <HardwareHealthDialog board={healthBoard} onClose={() => setHealthBoard(null)} />
+    <HardwareHealthDialog board={healthBoard} onClose={() => setHealthBoard(null)} onCompleted={(updated) => { setBoards((current) => current.map((board) => board.board_id === updated.board_id ? updated : board)); setHealthBoard(null); setMessage({ kind: "success", text: "体检结果已保存到主板记录。" }); }} />
   </div>;
 }

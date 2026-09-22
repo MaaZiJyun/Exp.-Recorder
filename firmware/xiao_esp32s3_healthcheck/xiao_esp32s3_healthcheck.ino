@@ -23,6 +23,7 @@ static const int PIN_MISO = 8;
 static const int PIN_MOSI = 9;
 static const int PIN_TX = 43;
 static const int PIN_RX = 44;
+static const char *FIRMWARE_ID = "XIAO_HEALTHCHECK_V2";
 
 String hardwareMac() {
   uint64_t chipId = ESP.getEfuseMac();
@@ -73,19 +74,34 @@ void testPwm() {
 }
 
 void testUart() {
+  // GPIO43/44 can contain a few transition bytes while UART1 is being
+  // attached. Match a binary sequence instead of comparing the whole receive
+  // buffer so startup noise cannot turn a valid loopback into a false failure.
+  static const uint8_t token[] = {0x55, 0xAA, 0x31, 0xC7, 0x4D, 0x82, 0x19, 0xE0};
+  Serial1.end();
   Serial1.begin(115200, SERIAL_8N1, PIN_RX, PIN_TX);
-  while (Serial1.available()) Serial1.read();
-  const char *token = "XIAO_UART_LOOP";
-  Serial1.print(token);
-  Serial1.flush();
-  String received;
-  unsigned long deadline = millis() + 500;
-  while (millis() < deadline && received.length() < strlen(token)) {
-    while (Serial1.available()) received += (char)Serial1.read();
-    delay(1);
+  delay(50);
+  bool passed = false;
+  for (int attempt = 0; attempt < 3 && !passed; attempt++) {
+    while (Serial1.available()) Serial1.read();
+    Serial1.write(token, sizeof(token));
+    Serial1.flush();
+    size_t matched = 0;
+    unsigned long deadline = millis() + 200;
+    while (millis() < deadline && matched < sizeof(token)) {
+      if (!Serial1.available()) {
+        delay(1);
+        continue;
+      }
+      uint8_t value = (uint8_t)Serial1.read();
+      matched = value == token[matched] ? matched + 1 : (value == token[0] ? 1 : 0);
+    }
+    passed = matched == sizeof(token);
   }
   Serial1.end();
-  Serial.println(received == token ? "PASS|UART|D6-TX to D7-RX" : "FAIL|UART|Check D6-D7 jumper");
+  pinMode(PIN_TX, INPUT);
+  pinMode(PIN_RX, INPUT);
+  Serial.println(passed ? "PASS|UART|D6-TX to D7-RX" : "FAIL|UART|Check D6-D7 jumper");
 }
 
 void testSpi() {
@@ -131,7 +147,7 @@ void processCommand(String command) {
   } else if (command == "HEALTH_I2C") {
     scanI2c();
   } else if (command == "PING") {
-    Serial.println("PASS|PING|XIAO_HEALTHCHECK_READY");
+    Serial.printf("PASS|PING|%s\n", FIRMWARE_ID);
   } else if (command.length()) {
     Serial.println("FAIL|COMMAND|Unknown command");
   }
@@ -141,7 +157,7 @@ void setup() {
   Serial.begin(115200);
   Serial.setTimeout(50);
   delay(500);
-  Serial.println("PASS|READY|XIAO_HEALTHCHECK_READY");
+  Serial.printf("PASS|READY|%s\n", FIRMWARE_ID);
 }
 
 void loop() {

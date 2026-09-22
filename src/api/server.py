@@ -134,10 +134,7 @@ class BoardRequest(BaseModel):
 
     name: str = Field(min_length=1, max_length=200)
     model: str = Field(min_length=1, max_length=200)
-    serial_number: str = Field(min_length=1, max_length=200)
-    wifi: bool = False
-    bluetooth: bool = False
-    usb: bool = False
+    mac: str = Field(min_length=1, max_length=200)
     gpio_count: int = Field(default=0, ge=0)
     working_voltage: float = Field(ge=0)
     status: Literal["online", "offline", "broken"] = "offline"
@@ -167,6 +164,20 @@ class XiaoHealthTestRequest(BaseModel):
 
     port: str = Field(min_length=1, max_length=500)
     test: Literal["gpio", "pwm", "uart", "spi", "i2c"]
+
+
+class BoardHealthResultRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    usb_detected: bool
+    mac: str = Field(min_length=12, max_length=17, pattern=r"^[0-9A-Fa-f:-]+$")
+    wifi: bool
+    bluetooth: bool
+    hello: bool
+    gpio: bool
+    pwm: bool
+    uart: bool
+    spi: bool
 
 
 class PositionMark(BaseModel):
@@ -634,6 +645,14 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
             ],
             "arduino_cli_available": checker.arduino_cli is not None,
         }
+
+    @app.put("/api/boards/{board_id}/health-result")
+    def complete_board_health(board_id: int, request: BoardHealthResultRequest) -> dict[str, Any]:
+        if not controller.db.update_board_health(board_id, request.model_dump()):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Board not found")
+        record = controller.db.get_board(board_id)
+        assert record is not None
+        return record
 
     @app.post("/api/boards/{board_id}/health/xiao/start", status_code=status.HTTP_202_ACCEPTED)
     def start_xiao_health(board_id: int, request: XiaoHealthStartRequest) -> dict[str, Any]:

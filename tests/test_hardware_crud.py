@@ -21,10 +21,7 @@ class TestHardwareCrud(unittest.TestCase):
         board_payload = BoardRequest(
             name="Controller A",
             model="ESP32-S3",
-            serial_number="BOARD-001",
-            wifi=True,
-            bluetooth=True,
-            usb=True,
+            mac="BOARD-001",
             gpio_count=45,
             working_voltage=3.3,
             status="online",
@@ -32,11 +29,36 @@ class TestHardwareCrud(unittest.TestCase):
         board_id = self.db.create_board(board_payload)
         board = self.db.get_board(board_id)
         self.assertIsNotNone(board)
-        self.assertTrue(board["wifi"])
+        self.assertEqual(board["mac"], "BOARD-001")
+        self.assertIsNone(board["health_usb_detected"])
         self.assertEqual(board["peripheral_count"], 0)
 
         with self.assertRaises(sqlite3.IntegrityError):
             self.db.create_board(board_payload)
+
+        health_result = {
+            "usb_detected": True,
+            "mac": "CCD90B697090",
+            "wifi": True,
+            "bluetooth": True,
+            "hello": True,
+            "gpio": True,
+            "pwm": False,
+            "uart": True,
+            "spi": True,
+        }
+        self.assertTrue(self.db.update_board_health(board_id, health_result))
+        board = self.db.get_board(board_id)
+        self.assertTrue(board["health_usb_detected"])
+        self.assertEqual(board["mac"], "CCD90B697090")
+        self.assertTrue(board["health_wifi"])
+        self.assertTrue(board["health_bluetooth"])
+        self.assertTrue(board["health_hello"])
+        self.assertTrue(board["health_gpio"])
+        self.assertFalse(board["health_pwm"])
+        self.assertTrue(board["health_uart"])
+        self.assertTrue(board["health_spi"])
+        self.assertIsNotNone(board["health_checked_at"])
 
         peripheral_payload = PeripheralRequest(
             name="Tracking Camera",
@@ -73,7 +95,7 @@ class TestHardwareCrud(unittest.TestCase):
             BoardRequest(
                 name="Bad board",
                 model="X",
-                serial_number="BAD-1",
+                mac="BAD-1",
                 gpio_count=1,
                 working_voltage=3.3,
                 status="retired",
@@ -90,6 +112,44 @@ class TestHardwareCrud(unittest.TestCase):
         )
         with self.assertRaises(sqlite3.IntegrityError):
             self.db.create_peripheral(orphan.model_dump())
+
+    def test_legacy_board_columns_are_migrated(self):
+        legacy_path = Path(self.tmp_dir.name) / "legacy.db"
+        with sqlite3.connect(legacy_path) as conn:
+            conn.execute(
+                """CREATE TABLE boards (
+                board_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL, model TEXT NOT NULL,
+                serial_number TEXT NOT NULL UNIQUE,
+                wifi INTEGER NOT NULL DEFAULT 0,
+                bluetooth INTEGER NOT NULL DEFAULT 0,
+                usb INTEGER NOT NULL DEFAULT 0,
+                gpio_count INTEGER NOT NULL DEFAULT 0,
+                working_voltage REAL NOT NULL,
+                status TEXT NOT NULL DEFAULT 'offline',
+                health_product TEXT, health_mac TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )"""
+            )
+            conn.execute(
+                """INSERT INTO boards
+                (name, model, serial_number, wifi, bluetooth, usb, gpio_count, working_voltage)
+                VALUES ('Inventory board', 'ESP32-S3', 'LEGACY-MAC', 1, 1, 1, 11, 3.3)"""
+            )
+        migrated = DatabaseManager(legacy_path)
+        columns = {
+            row["name"]
+            for row in migrated.get_connection().execute("PRAGMA table_info(boards)").fetchall()
+        }
+        self.assertIn("mac", columns)
+        self.assertNotIn("serial_number", columns)
+        self.assertNotIn("health_product", columns)
+        self.assertNotIn("health_mac", columns)
+        self.assertNotIn("wifi", columns)
+        self.assertNotIn("bluetooth", columns)
+        self.assertNotIn("usb", columns)
+        self.assertEqual(migrated.get_board(1)["mac"], "LEGACY-MAC")
 
 
 if __name__ == "__main__":

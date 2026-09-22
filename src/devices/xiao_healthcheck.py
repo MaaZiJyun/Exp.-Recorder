@@ -34,6 +34,7 @@ class XiaoESP32S3HealthCheck:
 
     FQBN = "esp32:esp32:XIAO_ESP32S3"
     BAUDRATE = 115200
+    FIRMWARE_ID = "XIAO_HEALTHCHECK_V2"
     INTERFACE_TESTS = {
         "gpio": {
             "command": "HEALTH_GPIO",
@@ -252,7 +253,7 @@ class XiaoESP32S3HealthCheck:
             if progress:
                 progress("firmware_probe", "正在检查板上是否已经运行体检固件…")
             probe = self.command(port, "PING", timeout=2.5)
-            already_installed = probe["passed"] and probe.get("detail") == "XIAO_HEALTHCHECK_READY"
+            already_installed = probe["passed"] and probe.get("detail") == self.FIRMWARE_ID
             if already_installed:
                 checks["flash"] = {
                     "passed": True,

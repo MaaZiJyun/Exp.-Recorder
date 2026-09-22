@@ -30,6 +30,31 @@ class DatabaseManager:
 
         with self.get_connection() as conn:
             conn.executescript(schema_sql)
+            existing_board_columns = {
+                row["name"] for row in conn.execute("PRAGMA table_info(boards)").fetchall()
+            }
+            if "serial_number" in existing_board_columns and "mac" not in existing_board_columns:
+                conn.execute("ALTER TABLE boards RENAME COLUMN serial_number TO mac")
+                existing_board_columns.remove("serial_number")
+                existing_board_columns.add("mac")
+            for obsolete_column in ("health_product", "health_mac", "wifi", "bluetooth", "usb"):
+                if obsolete_column in existing_board_columns:
+                    conn.execute(f"ALTER TABLE boards DROP COLUMN {obsolete_column}")
+                    existing_board_columns.remove(obsolete_column)
+            board_health_migrations = {
+                "health_usb_detected": "INTEGER",
+                "health_wifi": "INTEGER",
+                "health_bluetooth": "INTEGER",
+                "health_hello": "INTEGER",
+                "health_gpio": "INTEGER",
+                "health_pwm": "INTEGER",
+                "health_uart": "INTEGER",
+                "health_spi": "INTEGER",
+                "health_checked_at": "TIMESTAMP",
+            }
+            for column, definition in board_health_migrations.items():
+                if column not in existing_board_columns:
+                    conn.execute(f"ALTER TABLE boards ADD COLUMN {column} {definition}")
             existing_columns = {
                 row["name"] for row in conn.execute("PRAGMA table_info(trials)").fetchall()
             }
@@ -176,8 +201,12 @@ class DatabaseManager:
     @staticmethod
     def _board_dict(row: sqlite3.Row) -> Dict[str, Any]:
         record = dict(row)
-        for field in ("wifi", "bluetooth", "usb"):
-            record[field] = bool(record[field])
+        for field in (
+            "health_usb_detected", "health_wifi", "health_bluetooth",
+            "health_hello", "health_gpio", "health_pwm", "health_uart", "health_spi",
+        ):
+            if record.get(field) is not None:
+                record[field] = bool(record[field])
         return record
 
     @staticmethod
@@ -620,11 +649,10 @@ class DatabaseManager:
         with self.get_connection() as conn:
             cursor = conn.execute(
                 """INSERT INTO boards
-                (name, model, serial_number, wifi, bluetooth, usb, gpio_count, working_voltage, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (name, model, mac, gpio_count, working_voltage, status)
+                VALUES (?, ?, ?, ?, ?, ?)""",
                 (
-                    data["name"], data["model"], data["serial_number"],
-                    data["wifi"], data["bluetooth"], data["usb"],
+                    data["name"], data["model"], data["mac"],
                     data["gpio_count"], data["working_voltage"], data["status"],
                 ),
             )
@@ -634,13 +662,30 @@ class DatabaseManager:
     def update_board(self, board_id: int, data: Dict[str, Any]) -> bool:
         with self.get_connection() as conn:
             cursor = conn.execute(
-                """UPDATE boards SET name=?, model=?, serial_number=?, wifi=?, bluetooth=?,
-                usb=?, gpio_count=?, working_voltage=?, status=?, updated_at=CURRENT_TIMESTAMP
+                """UPDATE boards SET name=?, model=?, mac=?, gpio_count=?, working_voltage=?,
+                status=?, updated_at=CURRENT_TIMESTAMP
                 WHERE board_id=?""",
                 (
-                    data["name"], data["model"], data["serial_number"],
-                    data["wifi"], data["bluetooth"], data["usb"],
+                    data["name"], data["model"], data["mac"],
                     data["gpio_count"], data["working_voltage"], data["status"], board_id,
+                ),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def update_board_health(self, board_id: int, data: Dict[str, Any]) -> bool:
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """UPDATE boards SET
+                mac=?, health_usb_detected=?, health_wifi=?,
+                health_bluetooth=?, health_hello=?, health_gpio=?, health_pwm=?,
+                health_uart=?, health_spi=?, health_checked_at=CURRENT_TIMESTAMP,
+                updated_at=CURRENT_TIMESTAMP
+                WHERE board_id=?""",
+                (
+                    data["mac"], data["usb_detected"], data["wifi"],
+                    data["bluetooth"], data["hello"], data["gpio"], data["pwm"],
+                    data["uart"], data["spi"], board_id,
                 ),
             )
             conn.commit()

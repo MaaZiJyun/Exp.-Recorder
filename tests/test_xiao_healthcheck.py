@@ -20,7 +20,7 @@ class _Port:
 
 class _FakeSerial:
     def __init__(self, **_kwargs):
-        self.responses = [b"PASS|READY|XIAO_HEALTHCHECK_READY\n"]
+        self.responses = [b"PASS|READY|XIAO_HEALTHCHECK_V2\n"]
 
     def __enter__(self):
         return self
@@ -82,7 +82,7 @@ class TestXiaoHealthCheck(unittest.TestCase):
         checker = XiaoESP32S3HealthCheck(arduino_cli="arduino-cli")
         port = SerialPortInfo("/dev/cu.usbmodem42", "XIAO ESP32S3", "Seeed", "ABC", 0x303A, 0x1001, "USB")
         replies = [
-            {"passed": True, "detail": "XIAO_HEALTHCHECK_READY", "raw": "PASS|PING|XIAO_HEALTHCHECK_READY"},
+            {"passed": True, "detail": checker.FIRMWARE_ID, "raw": f"PASS|PING|{checker.FIRMWARE_ID}"},
             {"passed": True, "detail": "XIAO ESP32S3|AABBCCDDEEFF|WIFI=1|BLUETOOTH=1", "raw": "PASS|INFO|XIAO ESP32S3|AABBCCDDEEFF|WIFI=1|BLUETOOTH=1"},
             {"passed": True, "detail": "hello world", "raw": "PASS|HELLO|hello world"},
         ]

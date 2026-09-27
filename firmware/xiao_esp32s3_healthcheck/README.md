@@ -20,7 +20,7 @@ arduino-cli compile --fqbn esp32:esp32:XIAO_ESP32S3 \
 
 - `HEALTH_INFO`：产品、eFuse MAC、Wi-Fi 与 Bluetooth 能力
 - `HEALTH_HELLO`：运行并返回 `hello world`
-- `HEALTH_GPIO`：D0 ↔ D1 数字回环
+- `HEALTH_GPIO D0 D1`：指定任意两个 D0-D10 引脚进行数字回环；默认界面选择 D0 ↔ D1
 - `HEALTH_PWM`：D2 → D3 PWM 测量
 - `HEALTH_UART`：D6/TX ↔ D7/RX 回环
 - `HEALTH_SPI`：D10/MOSI → D9/MISO 回环

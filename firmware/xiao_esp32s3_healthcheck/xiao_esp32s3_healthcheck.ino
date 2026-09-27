@@ -23,7 +23,11 @@ static const int PIN_MISO = 8;
 static const int PIN_MOSI = 9;
 static const int PIN_TX = 43;
 static const int PIN_RX = 44;
-static const char *FIRMWARE_ID = "XIAO_HEALTHCHECK_V2";
+static const char *FIRMWARE_ID = "XIAO_HEALTHCHECK_V3";
+static const int DIGITAL_PINS[] = {
+  PIN_D0, PIN_D1, PIN_D2, PIN_D3, PIN_SDA, PIN_SCL,
+  PIN_TX, PIN_RX, PIN_SCK, PIN_MISO, PIN_MOSI
+};
 
 String hardwareMac() {
   uint64_t chipId = ESP.getEfuseMac();
@@ -51,8 +55,27 @@ bool digitalLoopback(int first, int second) {
   return lowOk && highOk && reverseOk;
 }
 
-void testGpio() {
-  Serial.println(digitalLoopback(PIN_D0, PIN_D1) ? "PASS|GPIO|D0-D1" : "FAIL|GPIO|Check D0-D1 jumper");
+int gpioForLabel(String label) {
+  label.trim();
+  label.toUpperCase();
+  if (!label.startsWith("D") || label.length() < 2) return -1;
+  int index = label.substring(1).toInt();
+  if (index < 0 || index > 10 || label != "D" + String(index)) return -1;
+  return DIGITAL_PINS[index];
+}
+
+void testGpio(const String &firstLabel, const String &secondLabel) {
+  int first = gpioForLabel(firstLabel);
+  int second = gpioForLabel(secondLabel);
+  if (first < 0 || second < 0 || first == second) {
+    Serial.println("FAIL|GPIO|Choose two different pins from D0-D10");
+    return;
+  }
+  if (digitalLoopback(first, second)) {
+    Serial.printf("PASS|GPIO|%s-%s\n", firstLabel.c_str(), secondLabel.c_str());
+  } else {
+    Serial.printf("FAIL|GPIO|Check %s-%s jumper\n", firstLabel.c_str(), secondLabel.c_str());
+  }
 }
 
 void testPwm() {
@@ -137,7 +160,21 @@ void processCommand(String command) {
   } else if (command == "HEALTH_HELLO") {
     Serial.println("PASS|HELLO|hello world");
   } else if (command == "HEALTH_GPIO") {
-    testGpio();
+    testGpio("D0", "D1");
+  } else if (command.startsWith("HEALTH_GPIO ")) {
+    String arguments = command.substring(strlen("HEALTH_GPIO "));
+    int separator = arguments.indexOf(' ');
+    if (separator < 1) {
+      Serial.println("FAIL|GPIO|Expected HEALTH_GPIO D0 D1");
+    } else {
+      String firstLabel = arguments.substring(0, separator);
+      String secondLabel = arguments.substring(separator + 1);
+      firstLabel.trim();
+      secondLabel.trim();
+      firstLabel.toUpperCase();
+      secondLabel.toUpperCase();
+      testGpio(firstLabel, secondLabel);
+    }
   } else if (command == "HEALTH_PWM") {
     testPwm();
   } else if (command == "HEALTH_UART") {

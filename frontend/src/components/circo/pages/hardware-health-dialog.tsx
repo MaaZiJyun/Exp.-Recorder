@@ -10,6 +10,8 @@ type PortResponse = {
   arduino_cli_available: boolean;
 };
 
+const gpioPins = Array.from({ length: 11 }, (_, index) => `D${index}`);
+
 function ResultBadge({ result }: { result?: XiaoHealthResult }) {
   if (!result) return <Badge>待检测</Badge>;
   if (result.skipped) return <Badge tone="info">已安装，跳过烧录</Badge>;
@@ -30,6 +32,7 @@ export function HardwareHealthDialog({ board, onClose, onCompleted }: { board: B
   const [loadingPorts, setLoadingPorts] = useState(false);
   const [running, setRunning] = useState(false);
   const [runningStep, setRunningStep] = useState<string | null>(null);
+  const [gpioPair, setGpioPair] = useState({ first: "D0", second: "D1" });
   const [completing, setCompleting] = useState(false);
   const [session, setSession] = useState<XiaoHealthSession | null>(null);
   const [healthJob, setHealthJob] = useState<XiaoHealthJob | null>(null);
@@ -44,6 +47,7 @@ export function HardwareHealthDialog({ board, onClose, onCompleted }: { board: B
       setSession(null);
       setHealthJob(null);
       setStepResults({});
+      setGpioPair({ first: "D0", second: "D1" });
       setSkippedSteps({});
       setPeripheralResults({});
       setCompleting(false);
@@ -90,13 +94,22 @@ export function HardwareHealthDialog({ board, onClose, onCompleted }: { board: B
     setRunningStep(id);
     setError(null);
     try {
-      const response = await api<{ result: XiaoHealthResult }>(`/boards/${board.board_id}/health/xiao/test`, { method: "POST", body: JSON.stringify({ port: session.port, test: id }) });
+      const response = await api<{ result: XiaoHealthResult }>(`/boards/${board.board_id}/health/xiao/test`, { method: "POST", body: JSON.stringify({ port: session.port, test: id, ...(id === "gpio" ? { pin_a: gpioPair.first, pin_b: gpioPair.second } : {}) }) });
       setStepResults((current) => ({ ...current, [id]: response.result }));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "接口测试失败");
     } finally {
       setRunningStep(null);
     }
+  };
+
+  const changeGpioPin = (side: "first" | "second", value: string) => {
+    setGpioPair((current) => ({ ...current, [side]: value }));
+    setStepResults((current) => {
+      const next = { ...current };
+      delete next.gpio;
+      return next;
+    });
   };
 
   const initialPassed = Boolean(session?.checks.usb?.passed && session?.checks.flash?.passed && session?.checks.identity?.passed && session?.checks.hello?.passed);
@@ -162,7 +175,7 @@ export function HardwareHealthDialog({ board, onClose, onCompleted }: { board: B
             const previousCompleted = index === 0 || session.steps.slice(0, index).every((item) => stepResults[item.id] !== undefined || skippedSteps[item.id]);
             const result = stepResults[step.id];
             const skipped = skippedSteps[step.id];
-            return <div key={step.id} className="grid gap-3 rounded-xl border border-zinc-200 p-4 md:grid-cols-[2rem_1fr_auto] md:items-center"><span className="grid size-8 place-items-center rounded-full bg-zinc-100 text-sm font-semibold">{index + 1}</span><div><div className="flex items-center gap-2"><strong className="text-sm">{step.title}</strong>{skipped ? <Badge tone="warning">已跳过</Badge> : <ResultBadge result={result} />}</div><p className="mt-1 text-xs leading-5 text-zinc-500">{step.instruction}</p>{result && !skipped && <p className={`mt-1 text-xs ${result.passed ? 'text-green-700' : 'text-red-700'}`}>{detailText(result.detail)}</p>}</div><div className="flex gap-2"><Button variant="secondary" disabled={!initialPassed || !previousCompleted || runningStep !== null} onClick={() => { setSkippedSteps((value) => ({ ...value, [step.id]: false })); void runStep(step.id); }}>{runningStep === step.id ? "测试中…" : result ? "重新测试" : "开始测试"}</Button>{step.id === "i2c" && <Button variant="ghost" disabled={runningStep !== null} onClick={() => setSkippedSteps((value) => ({ ...value, [step.id]: true }))}>没有模块，跳过</Button>}</div></div>;
+            return <div key={step.id} className="grid gap-3 rounded-xl border border-zinc-200 p-4 md:grid-cols-[2rem_1fr_auto] md:items-center"><span className="grid size-8 place-items-center rounded-full bg-zinc-100 text-sm font-semibold">{index + 1}</span><div><div className="flex items-center gap-2"><strong className="text-sm">{step.title}</strong>{skipped ? <Badge tone="warning">已跳过</Badge> : <ResultBadge result={result} />}</div>{step.id === "gpio" ? <><div className="mt-3 flex max-w-sm items-center gap-2"><Select aria-label="GPIO 第一个引脚" value={gpioPair.first} disabled={runningStep !== null} onChange={(event) => changeGpioPin("first", event.target.value)}>{gpioPins.map((pin) => <option key={pin} value={pin} disabled={pin === gpioPair.second}>{pin}</option>)}</Select><span className="text-sm text-zinc-500">↔</span><Select aria-label="GPIO 第二个引脚" value={gpioPair.second} disabled={runningStep !== null} onChange={(event) => changeGpioPin("second", event.target.value)}>{gpioPins.map((pin) => <option key={pin} value={pin} disabled={pin === gpioPair.first}>{pin}</option>)}</Select></div><p className="mt-2 text-xs leading-5 text-zinc-500">断电后用杜邦线连接 {gpioPair.first} 与 {gpioPair.second}，再重新上电。</p></> : <p className="mt-1 text-xs leading-5 text-zinc-500">{step.instruction}</p>}{result && !skipped && <p className={`mt-1 text-xs ${result.passed ? 'text-green-700' : 'text-red-700'}`}>{detailText(result.detail)}</p>}</div><div className="flex gap-2"><Button variant="secondary" disabled={!initialPassed || !previousCompleted || runningStep !== null} onClick={() => { setSkippedSteps((value) => ({ ...value, [step.id]: false })); void runStep(step.id); }}>{runningStep === step.id ? "测试中…" : result ? "重新测试" : "开始测试"}</Button>{step.id === "i2c" && <Button variant="ghost" disabled={runningStep !== null} onClick={() => setSkippedSteps((value) => ({ ...value, [step.id]: true }))}>没有模块，跳过</Button>}</div></div>;
           })}</div>
         </section>
 

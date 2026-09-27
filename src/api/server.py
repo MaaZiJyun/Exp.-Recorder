@@ -164,6 +164,8 @@ class XiaoHealthTestRequest(BaseModel):
 
     port: str = Field(min_length=1, max_length=500)
     test: Literal["gpio", "pwm", "uart", "spi", "i2c"]
+    pin_a: Optional[Literal["D0", "D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9", "D10"]] = None
+    pin_b: Optional[Literal["D0", "D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9", "D10"]] = None
 
 
 class BoardHealthResultRequest(BaseModel):
@@ -729,7 +731,12 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Board not found")
         ensure_inventory_port(request.port)
         try:
-            return XiaoESP32S3HealthCheck().run_interface_test(request.port, request.test)
+            return XiaoESP32S3HealthCheck().run_interface_test(
+                request.port,
+                request.test,
+                pin_a=request.pin_a,
+                pin_b=request.pin_b,
+            )
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 

@@ -34,7 +34,8 @@ class XiaoESP32S3HealthCheck:
 
     FQBN = "esp32:esp32:XIAO_ESP32S3"
     BAUDRATE = 115200
-    FIRMWARE_ID = "XIAO_HEALTHCHECK_V2"
+    FIRMWARE_ID = "XIAO_HEALTHCHECK_V3"
+    GPIO_PINS = tuple(f"D{index}" for index in range(11))
     INTERFACE_TESTS = {
         "gpio": {
             "command": "HEALTH_GPIO",
@@ -289,11 +290,29 @@ class XiaoESP32S3HealthCheck:
             progress("complete", "基础体检完成，等待接口接线测试。")
         return {"port": port, "checks": checks, "steps": self.steps()}
 
-    def run_interface_test(self, port: str, test: str) -> dict[str, Any]:
+    def run_interface_test(
+        self,
+        port: str,
+        test: str,
+        pin_a: Optional[str] = None,
+        pin_b: Optional[str] = None,
+    ) -> dict[str, Any]:
         config = self.INTERFACE_TESTS.get(test)
         if config is None:
             raise ValueError(f"Unsupported interface test: {test}")
-        return {"id": test, **config, "result": self.command(port, config["command"])}
+        command = config["command"]
+        response = {"id": test, **config}
+        if test == "gpio":
+            first = pin_a or "D0"
+            second = pin_b or "D1"
+            if first not in self.GPIO_PINS or second not in self.GPIO_PINS:
+                raise ValueError("GPIO pin must be one of D0-D10")
+            if first == second:
+                raise ValueError("GPIO loopback requires two different pins")
+            command = f"HEALTH_GPIO {first} {second}"
+            response["instruction"] = f"断电后用杜邦线连接 {first} 与 {second}，再重新上电。"
+            response["pins"] = [first, second]
+        return {**response, "result": self.command(port, command)}
 
     @classmethod
     def steps(cls) -> list[dict[str, str]]:

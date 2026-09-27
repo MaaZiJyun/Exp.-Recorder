@@ -20,7 +20,7 @@ class _Port:
 
 class _FakeSerial:
     def __init__(self, **_kwargs):
-        self.responses = [b"PASS|READY|XIAO_HEALTHCHECK_V2\n"]
+        self.responses = [b"PASS|READY|XIAO_HEALTHCHECK_V3\n"]
 
     def __enter__(self):
         return self
@@ -32,8 +32,9 @@ class _FakeSerial:
         command = payload.decode().strip()
         if command == "HEALTH_HELLO":
             self.responses.append(b"PASS|HELLO|hello world\n")
-        elif command == "HEALTH_GPIO":
-            self.responses.append(b"PASS|GPIO|D0-D1\n")
+        elif command.startswith("HEALTH_GPIO "):
+            pins = command.removeprefix("HEALTH_GPIO ").replace(" ", "-")
+            self.responses.append(f"PASS|GPIO|{pins}\n".encode())
 
     def flush(self):
         return None
@@ -66,11 +67,15 @@ class TestXiaoHealthCheck(unittest.TestCase):
         checker = XiaoESP32S3HealthCheck(arduino_cli="arduino-cli")
         with patch.dict(sys.modules, {"serial": serial_module}):
             hello = checker.command("/dev/cu.usbmodem42", "HEALTH_HELLO", timeout=0.1)
-            gpio = checker.run_interface_test("/dev/cu.usbmodem42", "gpio")
+            gpio = checker.run_interface_test("/dev/cu.usbmodem42", "gpio", pin_a="D3", pin_b="D8")
         self.assertTrue(hello["passed"])
         self.assertEqual(hello["detail"], "hello world")
         self.assertTrue(gpio["result"]["passed"])
-        self.assertIn("D0", gpio["instruction"])
+        self.assertEqual(gpio["pins"], ["D3", "D8"])
+        self.assertIn("D3", gpio["instruction"])
+
+        with self.assertRaisesRegex(ValueError, "different pins"):
+            checker.run_interface_test("/dev/cu.usbmodem42", "gpio", pin_a="D4", pin_b="D4")
 
     def test_flash_reports_missing_cli(self):
         checker = XiaoESP32S3HealthCheck(arduino_cli="")

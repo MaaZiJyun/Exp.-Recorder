@@ -68,6 +68,6 @@ export function AppShell({ activePage, onPageChange, status, children }: { activ
       </nav>
       <div className="mt-auto hidden border-t border-zinc-200 pt-5 sm:block">{status}</div>
     </aside>
-    <div className="min-w-0 flex-1 lg:overflow-y-auto"><main className="mx-auto max-w-7xl p-4 sm:p-7 lg:p-10">{children}</main></div>
+    <div className="min-w-0 flex-1 lg:overflow-y-auto"><main className={activePage === "live-control" ? "h-dvh" : "mx-auto max-w-7xl p-4 sm:p-7 lg:p-10"}>{children}</main></div>
   </div>;
 }

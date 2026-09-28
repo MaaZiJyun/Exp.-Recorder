@@ -8,6 +8,7 @@
  */
 
 #include <Arduino.h>
+#include <esp_mac.h>
 #include <SPI.h>
 #include <WiFi.h>
 #include <Wire.h>
@@ -23,16 +24,22 @@ static const int PIN_MISO = 8;
 static const int PIN_MOSI = 9;
 static const int PIN_TX = 43;
 static const int PIN_RX = 44;
-static const char *FIRMWARE_ID = "XIAO_HEALTHCHECK_V3";
+static const char *FIRMWARE_ID = "XIAO_HEALTHCHECK_V4";
 static const int DIGITAL_PINS[] = {
   PIN_D0, PIN_D1, PIN_D2, PIN_D3, PIN_SDA, PIN_SCL,
   PIN_TX, PIN_RX, PIN_SCK, PIN_MISO, PIN_MOSI
 };
 
 String hardwareMac() {
-  uint64_t chipId = ESP.getEfuseMac();
+  uint8_t mac[6];
+  esp_read_mac(mac, ESP_MAC_WIFI_STA);
   char value[13];
-  snprintf(value, sizeof(value), "%04X%08X", (uint16_t)(chipId >> 32), (uint32_t)chipId);
+  snprintf(
+    value,
+    sizeof(value),
+    "%02X%02X%02X%02X%02X%02X",
+    mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]
+  );
   return String(value);
 }
 

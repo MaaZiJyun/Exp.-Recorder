@@ -34,7 +34,7 @@ class XiaoESP32S3HealthCheck:
 
     FQBN = "esp32:esp32:XIAO_ESP32S3"
     BAUDRATE = 115200
-    FIRMWARE_ID = "XIAO_HEALTHCHECK_V3"
+    FIRMWARE_ID = "XIAO_HEALTHCHECK_V4"
     GPIO_PINS = tuple(f"D{index}" for index in range(11))
     INTERFACE_TESTS = {
         "gpio": {

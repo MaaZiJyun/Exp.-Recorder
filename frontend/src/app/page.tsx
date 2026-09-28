@@ -14,11 +14,13 @@ import { SignalGenerationPage } from "@/components/circo/pages/signal-generation
 import { SoftwarePage } from "@/components/circo/pages/software-page";
 import { TrialsPage } from "@/components/circo/pages/trials-page";
 import { useRecorder } from "./use-recorder";
+import type { Board } from "./types";
 
 export default function Home() {
   const ctx = useRecorder();
   const { devices, ready, changeSection, changeWorkspace } = ctx;
   const [activePage, setActivePage] = useState<PageId>("signal-generation");
+  const [controlBoard, setControlBoard] = useState<Board | null>(null);
 
   const changePage = (page: PageId) => {
     setActivePage(page);
@@ -36,13 +38,13 @@ export default function Home() {
   const content = {
     objects: <ObjectsPage ctx={ctx} />,
     "materials-tools": <MaterialsToolsPage />,
-    hardware: <HardwarePage />,
+    hardware: <HardwarePage onOpenConsole={(board) => { setControlBoard(board); changePage("live-control"); }} />,
     software: <SoftwarePage />,
     positions: <PositionsPage ctx={ctx} />,
     plans: <PlansPage ctx={ctx} />,
     trials: <TrialsPage ctx={ctx} />,
     "signal-generation": <SignalGenerationPage ctx={ctx} />,
-    "live-control": <LiveControlPage />,
+    "live-control": <LiveControlPage board={controlBoard} />,
     logs: <LogsPage ctx={ctx} />,
   } satisfies Record<PageId, React.ReactNode>;
 

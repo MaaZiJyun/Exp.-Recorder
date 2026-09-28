@@ -19,11 +19,8 @@ class TestHardwareCrud(unittest.TestCase):
 
     def test_board_and_peripheral_crud(self):
         board_payload = BoardRequest(
-            name="Controller A",
             model="ESP32-S3",
             mac="BOARD-001",
-            gpio_count=45,
-            working_voltage=3.3,
             status="online",
         ).model_dump()
         board_id = self.db.create_board(board_payload)
@@ -38,6 +35,7 @@ class TestHardwareCrud(unittest.TestCase):
 
         health_result = {
             "usb_detected": True,
+            "model": "XIAO ESP32S3",
             "mac": "CCD90B697090",
             "wifi": True,
             "bluetooth": True,
@@ -50,6 +48,7 @@ class TestHardwareCrud(unittest.TestCase):
         self.assertTrue(self.db.update_board_health(board_id, health_result))
         board = self.db.get_board(board_id)
         self.assertTrue(board["health_usb_detected"])
+        self.assertEqual(board["model"], "XIAO ESP32S3")
         self.assertEqual(board["mac"], "CCD90B697090")
         self.assertTrue(board["health_wifi"])
         self.assertTrue(board["health_bluetooth"])
@@ -71,7 +70,7 @@ class TestHardwareCrud(unittest.TestCase):
         ).model_dump()
         peripheral_id = self.db.create_peripheral(peripheral_payload)
         peripheral = self.db.get_peripheral(peripheral_id)
-        self.assertEqual(peripheral["board_name"], "Controller A")
+        self.assertEqual(peripheral["board_name"], "XIAO ESP32S3 · CCD90B697090")
         self.assertEqual(self.db.get_board(board_id)["peripheral_count"], 1)
 
         with self.assertRaises(sqlite3.IntegrityError):
@@ -81,9 +80,9 @@ class TestHardwareCrud(unittest.TestCase):
         self.assertTrue(self.db.update_peripheral(peripheral_id, peripheral_payload))
         self.assertEqual(self.db.get_peripheral(peripheral_id)["status"], "online")
 
-        board_payload["name"] = "Controller B"
+        board_payload["model"] = "Controller B"
         self.assertTrue(self.db.update_board(board_id, board_payload))
-        self.assertEqual(self.db.get_board(board_id)["name"], "Controller B")
+        self.assertEqual(self.db.get_board(board_id)["model"], "Controller B")
 
         self.assertTrue(self.db.delete_peripheral(peripheral_id))
         self.assertTrue(self.db.delete_board(board_id))
@@ -93,11 +92,8 @@ class TestHardwareCrud(unittest.TestCase):
     def test_request_enums_and_foreign_key_are_validated(self):
         with self.assertRaises(ValidationError):
             BoardRequest(
-                name="Bad board",
                 model="X",
                 mac="BAD-1",
-                gpio_count=1,
-                working_voltage=3.3,
                 status="retired",
             )
 
@@ -112,6 +108,17 @@ class TestHardwareCrud(unittest.TestCase):
         )
         with self.assertRaises(sqlite3.IntegrityError):
             self.db.create_peripheral(orphan.model_dump())
+
+    def test_refresh_board_statuses(self):
+        online_id = self.db.create_board(BoardRequest(model="ESP32-S3", mac="CCD90B697090", status="offline").model_dump())
+        offline_id = self.db.create_board(BoardRequest(model="ESP32-S3", mac="AABBCCDDEEFF", status="online").model_dump())
+        broken_id = self.db.create_board(BoardRequest(model="ESP32-S3", mac="102030405060", status="broken").model_dump())
+
+        records = self.db.refresh_board_statuses({"CCD90B697090"})
+        by_id = {record["board_id"]: record for record in records}
+        self.assertEqual(by_id[online_id]["status"], "online")
+        self.assertEqual(by_id[offline_id]["status"], "offline")
+        self.assertEqual(by_id[broken_id]["status"], "broken")
 
     def test_legacy_board_columns_are_migrated(self):
         legacy_path = Path(self.tmp_dir.name) / "legacy.db"
@@ -149,7 +156,46 @@ class TestHardwareCrud(unittest.TestCase):
         self.assertNotIn("wifi", columns)
         self.assertNotIn("bluetooth", columns)
         self.assertNotIn("usb", columns)
+        self.assertNotIn("name", columns)
+        self.assertNotIn("gpio_count", columns)
+        self.assertNotIn("working_voltage", columns)
         self.assertEqual(migrated.get_board(1)["mac"], "LEGACY-MAC")
+
+    def test_create_board_from_health_upserts_detected_parameters(self):
+        result = {
+            "model": "XIAO ESP32S3",
+            "mac": "CCD90B697090",
+            "usb_detected": True,
+            "wifi": True,
+            "bluetooth": True,
+            "hello": True,
+            "gpio": True,
+            "pwm": True,
+            "uart": False,
+            "spi": True,
+        }
+        board_id = self.db.create_board_from_health(result)
+        self.assertEqual(self.db.get_board(board_id)["status"], "online")
+        result["model"] = "XIAO ESP32S3 (detected)"
+        self.assertEqual(self.db.create_board_from_health(result), board_id)
+        self.assertEqual(self.db.get_board(board_id)["model"], "XIAO ESP32S3 (detected)")
+
+    def test_reversed_healthcheck_macs_are_migrated_once(self):
+        db_path = Path(self.tmp_dir.name) / "network-order.db"
+        initial = DatabaseManager(db_path)
+        with initial.get_connection() as conn:
+            conn.execute(
+                "DELETE FROM app_metadata WHERE key=?",
+                (DatabaseManager.NETWORK_MAC_MIGRATION_KEY,),
+            )
+            conn.execute(
+                "INSERT INTO boards (model, mac) VALUES (?, ?)",
+                ("XIAO ESP32S3", "0C63FBA172E0"),
+            )
+
+        migrated = DatabaseManager(db_path)
+        self.assertEqual(migrated.get_board(1)["mac"], "E072A1FB630C")
+        self.assertEqual(DatabaseManager(db_path).get_board(1)["mac"], "E072A1FB630C")
 
 
 if __name__ == "__main__":

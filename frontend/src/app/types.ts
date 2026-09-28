@@ -11,11 +11,8 @@ export type HardwareStatus = "online" | "offline" | "broken";
 
 export type Board = {
   board_id: number;
-  name: string;
   model: string;
   mac: string;
-  gpio_count: number;
-  working_voltage: number;
   status: HardwareStatus;
   health_usb_detected: boolean | null;
   health_wifi: boolean | null;
@@ -76,7 +73,7 @@ export type XiaoHealthStep = {
 
 export type XiaoHealthSession = {
   port: string;
-  board: Board;
+  board?: Board;
   checks: Record<string, XiaoHealthResult>;
   steps: XiaoHealthStep[];
   peripherals: Peripheral[];

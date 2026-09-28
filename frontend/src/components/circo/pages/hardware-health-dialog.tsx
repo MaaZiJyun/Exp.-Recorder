@@ -25,7 +25,7 @@ function detailText(detail: XiaoHealthResult["detail"] | undefined) {
   return [port.product, port.manufacturer, port.serial_number, port.device].filter(Boolean).join(" · ");
 }
 
-export function HardwareHealthDialog({ board, onClose, onCompleted }: { board: Board | null; onClose: () => void; onCompleted: (board: Board) => void }) {
+export function HardwareHealthDialog({ board, creating = false, onClose, onCompleted }: { board: Board | null; creating?: boolean; onClose: () => void; onCompleted: (board: Board) => void }) {
   const [ports, setPorts] = useState<XiaoSerialPort[]>([]);
   const [selectedPort, setSelectedPort] = useState("");
   const [toolAvailable, setToolAvailable] = useState(true);
@@ -40,9 +40,10 @@ export function HardwareHealthDialog({ board, onClose, onCompleted }: { board: B
   const [skippedSteps, setSkippedSteps] = useState<Record<string, boolean>>({});
   const [peripheralResults, setPeripheralResults] = useState<Record<number, boolean>>({});
   const [error, setError] = useState<string | null>(null);
+  const open = creating || board !== null;
 
   useEffect(() => {
-    if (!board) return;
+    if (!open) return;
     const timer = window.setTimeout(() => {
       setSession(null);
       setHealthJob(null);
@@ -64,16 +65,17 @@ export function HardwareHealthDialog({ board, onClose, onCompleted }: { board: B
         .finally(() => setLoadingPorts(false));
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [board]);
+  }, [board, open]);
 
   const start = async () => {
-    if (!board || !selectedPort) return;
+    if (!selectedPort) return;
     setRunning(true);
     setError(null);
     setSession(null);
     setHealthJob(null);
     try {
-      let job = await api<XiaoHealthJob>(`/boards/${board.board_id}/health/xiao/start`, { method: "POST", body: JSON.stringify({ port: selectedPort, flash: true }) });
+      const path = board ? `/boards/${board.board_id}/health/xiao/start` : "/hardware-health/xiao/start";
+      let job = await api<XiaoHealthJob>(path, { method: "POST", body: JSON.stringify({ port: selectedPort, flash: true }) });
       setHealthJob(job);
       while (job.status === "queued" || job.status === "running") {
         await new Promise((resolve) => window.setTimeout(resolve, 500));
@@ -90,11 +92,12 @@ export function HardwareHealthDialog({ board, onClose, onCompleted }: { board: B
   };
 
   const runStep = async (id: string) => {
-    if (!board || !session) return;
+    if (!session) return;
     setRunningStep(id);
     setError(null);
     try {
-      const response = await api<{ result: XiaoHealthResult }>(`/boards/${board.board_id}/health/xiao/test`, { method: "POST", body: JSON.stringify({ port: session.port, test: id, ...(id === "gpio" ? { pin_a: gpioPair.first, pin_b: gpioPair.second } : {}) }) });
+      const path = board ? `/boards/${board.board_id}/health/xiao/test` : "/hardware-health/xiao/test";
+      const response = await api<{ result: XiaoHealthResult }>(path, { method: "POST", body: JSON.stringify({ port: session.port, test: id, ...(id === "gpio" ? { pin_a: gpioPair.first, pin_b: gpioPair.second } : {}) }) });
       setStepResults((current) => ({ ...current, [id]: response.result }));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "接口测试失败");
@@ -121,15 +124,16 @@ export function HardwareHealthDialog({ board, onClose, onCompleted }: { board: B
   );
 
   const completeHealth = async () => {
-    if (!board || !session || !canComplete) return;
+    if (!session || !canComplete) return;
     setCompleting(true);
     setError(null);
     try {
       const identity = session.checks.identity;
-      const updated = await api<Board>(`/boards/${board.board_id}/health-result`, {
-        method: "PUT",
+      const updated = await api<Board>(board ? `/boards/${board.board_id}/health-result` : "/boards/from-health", {
+        method: board ? "PUT" : "POST",
         body: JSON.stringify({
           usb_detected: Boolean(session.checks.usb?.passed),
+          model: identity.product,
           mac: identity.hardware_mac,
           wifi: Boolean(identity.wifi),
           bluetooth: Boolean(identity.bluetooth),
@@ -148,7 +152,7 @@ export function HardwareHealthDialog({ board, onClose, onCompleted }: { board: B
     }
   };
 
-  return <Dialog open={board !== null} title={`板子体检${board ? ` · ${board.name}` : ""}`} closeLabel="关闭" onClose={onClose} size="wide">
+  return <Dialog open={open} title={board ? `板子体检 · ${board.model} · ${board.mac}` : "新主板体检"} closeLabel="关闭" onClose={onClose} size="wide">
     <div className="grid gap-6">
       <Alert tone="warning"><strong>库存诊断模式：</strong>体检会向所选库存板烧录专用固件，覆盖板上原有程序。实验台正在使用的 XIAO 串口会被锁定且不可选择。</Alert>
       {error && <Alert tone="danger">{error}</Alert>}

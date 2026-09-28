@@ -10,6 +10,7 @@ import io
 import math
 from pathlib import Path
 import re
+import sqlite3
 import threading
 from concurrent.futures import ThreadPoolExecutor
 import uuid
@@ -27,6 +28,7 @@ from src.database.db_manager import DatabaseManager
 from src.devices.sdg1022x import SDG1022XDriver
 from src.devices.xiao_camera import XiaoCameraDriver
 from src.devices.xiao_healthcheck import XiaoESP32S3HealthCheck
+from src.devices.lan_board_discovery import LanBoardDiscovery, normalize_mac
 
 
 class TrialRequest(BaseModel):
@@ -132,11 +134,8 @@ class SpeciesRequest(BaseModel):
 class BoardRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
-    name: str = Field(min_length=1, max_length=200)
     model: str = Field(min_length=1, max_length=200)
     mac: str = Field(min_length=1, max_length=200)
-    gpio_count: int = Field(default=0, ge=0)
-    working_voltage: float = Field(ge=0)
     status: Literal["online", "offline", "broken"] = "offline"
 
 
@@ -172,6 +171,7 @@ class BoardHealthResultRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     usb_detected: bool
+    model: str = Field(min_length=1, max_length=200)
     mac: str = Field(min_length=12, max_length=17, pattern=r"^[0-9A-Fa-f:-]+$")
     wifi: bool
     bluetooth: bool
@@ -557,13 +557,31 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
     def boards() -> list[dict[str, Any]]:
         return controller.db.list_boards()
 
+    @app.post("/api/boards/discover")
+    def discover_boards() -> dict[str, Any]:
+        inventory = controller.db.list_boards()
+        discovered = LanBoardDiscovery().discover(board["mac"] for board in inventory)
+        discovered_macs = {record.mac for record in discovered}
+        registered_macs = {
+            normalized: board["board_id"]
+            for board in inventory
+            if (normalized := normalize_mac(board["mac"]))
+        }
+        refreshed = controller.db.refresh_board_statuses(discovered_macs)
+        return {
+            "boards": refreshed,
+            "online_board_ids": sorted(registered_macs[mac] for mac in discovered_macs if mac in registered_macs),
+            "discovered": [record.to_dict() for record in sorted(discovered, key=lambda item: item.mac)],
+            "scanned_at": datetime.now().isoformat(timespec="seconds"),
+        }
+
     @app.post("/api/boards", status_code=status.HTTP_201_CREATED)
     def create_board(request: BoardRequest) -> dict[str, Any]:
         try:
             board_id = controller.db.create_board(request.model_dump())
         except Exception as exc:
             if "UNIQUE constraint failed" in str(exc):
-                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Serial Number already exists") from exc
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="MAC already exists") from exc
             raise
         record = controller.db.get_board(board_id)
         assert record is not None
@@ -575,7 +593,7 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
             updated = controller.db.update_board(board_id, request.model_dump())
         except Exception as exc:
             if "UNIQUE constraint failed" in str(exc):
-                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Serial Number already exists") from exc
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="MAC already exists") from exc
             raise
         if not updated:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Board not found")
@@ -650,16 +668,25 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
 
     @app.put("/api/boards/{board_id}/health-result")
     def complete_board_health(board_id: int, request: BoardHealthResultRequest) -> dict[str, Any]:
-        if not controller.db.update_board_health(board_id, request.model_dump()):
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Board not found")
+        try:
+            if not controller.db.update_board_health(board_id, request.model_dump()):
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Board not found")
+        except sqlite3.IntegrityError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="该 MAC 已属于另一块主板") from exc
         record = controller.db.get_board(board_id)
         assert record is not None
         return record
 
-    @app.post("/api/boards/{board_id}/health/xiao/start", status_code=status.HTTP_202_ACCEPTED)
-    def start_xiao_health(board_id: int, request: XiaoHealthStartRequest) -> dict[str, Any]:
-        board = controller.db.get_board(board_id)
-        if board is None:
+    @app.post("/api/boards/from-health", status_code=status.HTTP_201_CREATED)
+    def create_board_from_health(request: BoardHealthResultRequest) -> dict[str, Any]:
+        board_id = controller.db.create_board_from_health(request.model_dump())
+        record = controller.db.get_board(board_id)
+        assert record is not None
+        return record
+
+    def start_xiao_health_job(request: XiaoHealthStartRequest, board_id: Optional[int] = None) -> dict[str, Any]:
+        board = controller.db.get_board(board_id) if board_id is not None else None
+        if board_id is not None and board is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Board not found")
         ensure_inventory_port(request.port)
         job_id = uuid.uuid4().hex
@@ -698,12 +725,9 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
                     flash=request.flash,
                     progress=report,
                 )
-                result.update(
-                    {
-                        "board": board,
-                        "peripherals": controller.db.list_peripherals(board_id),
-                    }
-                )
+                result["peripherals"] = controller.db.list_peripherals(board_id) if board_id is not None else []
+                if board is not None:
+                    result["board"] = board
                 with health_jobs_lock:
                     current = health_jobs[job_id]
                     current["status"] = "completed"
@@ -717,6 +741,14 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
         with health_jobs_lock:
             return {**health_jobs[job_id], "logs": list(health_jobs[job_id]["logs"])}
 
+    @app.post("/api/hardware-health/xiao/start", status_code=status.HTTP_202_ACCEPTED)
+    def start_new_xiao_health(request: XiaoHealthStartRequest) -> dict[str, Any]:
+        return start_xiao_health_job(request)
+
+    @app.post("/api/boards/{board_id}/health/xiao/start", status_code=status.HTTP_202_ACCEPTED)
+    def start_xiao_health(board_id: int, request: XiaoHealthStartRequest) -> dict[str, Any]:
+        return start_xiao_health_job(request, board_id)
+
     @app.get("/api/hardware-health/jobs/{job_id}")
     def xiao_health_job(job_id: str) -> dict[str, Any]:
         with health_jobs_lock:
@@ -729,6 +761,19 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
     def run_xiao_health_test(board_id: int, request: XiaoHealthTestRequest) -> dict[str, Any]:
         if controller.db.get_board(board_id) is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Board not found")
+        ensure_inventory_port(request.port)
+        try:
+            return XiaoESP32S3HealthCheck().run_interface_test(
+                request.port,
+                request.test,
+                pin_a=request.pin_a,
+                pin_b=request.pin_b,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+
+    @app.post("/api/hardware-health/xiao/test")
+    def run_new_xiao_health_test(request: XiaoHealthTestRequest) -> dict[str, Any]:
         ensure_inventory_port(request.port)
         try:
             return XiaoESP32S3HealthCheck().run_interface_test(

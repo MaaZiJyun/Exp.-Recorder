@@ -1,5 +1,10 @@
 -- SQLite Database Schema for Experiment Automation System
 
+CREATE TABLE IF NOT EXISTS app_metadata (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS species (
     species_id INTEGER PRIMARY KEY AUTOINCREMENT,
     code TEXT NOT NULL UNIQUE COLLATE NOCASE,
@@ -27,11 +32,8 @@ CREATE TABLE IF NOT EXISTS subjects (
 
 CREATE TABLE IF NOT EXISTS boards (
     board_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
     model TEXT NOT NULL,
     mac TEXT NOT NULL UNIQUE COLLATE NOCASE,
-    gpio_count INTEGER NOT NULL DEFAULT 0 CHECK (gpio_count >= 0),
-    working_voltage REAL NOT NULL CHECK (working_voltage >= 0),
     status TEXT NOT NULL DEFAULT 'offline' CHECK (status IN ('online', 'offline', 'broken')),
     health_usb_detected INTEGER CHECK (health_usb_detected IN (0, 1)),
     health_wifi INTEGER CHECK (health_wifi IN (0, 1)),

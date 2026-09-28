@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import re
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -10,6 +11,8 @@ from src.config import DB_PATH
 
 
 class DatabaseManager:
+    NETWORK_MAC_MIGRATION_KEY = "boards_mac_network_order_v1"
+
     def __init__(self, db_path: Optional[Path] = None):
         self.db_path = Path(db_path) if db_path else DB_PATH
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -37,7 +40,10 @@ class DatabaseManager:
                 conn.execute("ALTER TABLE boards RENAME COLUMN serial_number TO mac")
                 existing_board_columns.remove("serial_number")
                 existing_board_columns.add("mac")
-            for obsolete_column in ("health_product", "health_mac", "wifi", "bluetooth", "usb"):
+            for obsolete_column in (
+                "health_product", "health_mac", "wifi", "bluetooth", "usb",
+                "name", "gpio_count", "working_voltage",
+            ):
                 if obsolete_column in existing_board_columns:
                     conn.execute(f"ALTER TABLE boards DROP COLUMN {obsolete_column}")
                     existing_board_columns.remove(obsolete_column)
@@ -55,6 +61,7 @@ class DatabaseManager:
             for column, definition in board_health_migrations.items():
                 if column not in existing_board_columns:
                     conn.execute(f"ALTER TABLE boards ADD COLUMN {column} {definition}")
+            self._migrate_board_macs_to_network_order(conn)
             existing_columns = {
                 row["name"] for row in conn.execute("PRAGMA table_info(trials)").fetchall()
             }
@@ -172,6 +179,43 @@ class DatabaseManager:
                 WHERE response_latency_s IS NOT NULL OR response_action IS NOT NULL
             """)
             conn.commit()
+
+    @classmethod
+    def _migrate_board_macs_to_network_order(cls, conn: sqlite3.Connection) -> None:
+        """Convert MACs emitted by health-check firmware V3 to network byte order once."""
+        migrated = conn.execute(
+            "SELECT 1 FROM app_metadata WHERE key=?",
+            (cls.NETWORK_MAC_MIGRATION_KEY,),
+        ).fetchone()
+        if migrated:
+            return
+
+        updates: list[tuple[int, str]] = []
+        for row in conn.execute("SELECT board_id, mac FROM boards").fetchall():
+            compact = re.sub(r"[^0-9A-Fa-f]", "", row["mac"])
+            if len(compact) != 12:
+                continue
+            octets = [compact[index:index + 2] for index in range(0, 12, 2)]
+            updates.append((int(row["board_id"]), "".join(reversed(octets)).upper()))
+
+        # Use temporary values so a valid reversal cannot trip the UNIQUE MAC
+        # constraint while another row still contains the destination value.
+        for board_id, _ in updates:
+            conn.execute(
+                "UPDATE boards SET mac=? WHERE board_id=?",
+                (f"__MAC_NETWORK_ORDER_{board_id}__", board_id),
+            )
+        for board_id, network_mac in updates:
+            conn.execute(
+                """UPDATE boards SET mac=?, updated_at=CURRENT_TIMESTAMP
+                WHERE board_id=?""",
+                (network_mac, board_id),
+            )
+
+        conn.execute(
+            "INSERT INTO app_metadata (key, value) VALUES (?, 'complete')",
+            (cls.NETWORK_MAC_MIGRATION_KEY,),
+        )
 
     @staticmethod
     def _resolve_position_image(conn: sqlite3.Connection, image: Optional[str]) -> Optional[int]:
@@ -629,7 +673,7 @@ class DatabaseManager:
                 FROM boards b
                 LEFT JOIN peripherals p ON p.board_id = b.board_id
                 GROUP BY b.board_id
-                ORDER BY b.name COLLATE NOCASE, b.board_id"""
+                ORDER BY b.model COLLATE NOCASE, b.board_id"""
             ).fetchall()
             return [self._board_dict(row) for row in rows]
 
@@ -649,12 +693,8 @@ class DatabaseManager:
         with self.get_connection() as conn:
             cursor = conn.execute(
                 """INSERT INTO boards
-                (name, model, mac, gpio_count, working_voltage, status)
-                VALUES (?, ?, ?, ?, ?, ?)""",
-                (
-                    data["name"], data["model"], data["mac"],
-                    data["gpio_count"], data["working_voltage"], data["status"],
-                ),
+                (model, mac, status) VALUES (?, ?, ?)""",
+                (data["model"], data["mac"], data["status"]),
             )
             conn.commit()
             return int(cursor.lastrowid)
@@ -662,13 +702,9 @@ class DatabaseManager:
     def update_board(self, board_id: int, data: Dict[str, Any]) -> bool:
         with self.get_connection() as conn:
             cursor = conn.execute(
-                """UPDATE boards SET name=?, model=?, mac=?, gpio_count=?, working_voltage=?,
-                status=?, updated_at=CURRENT_TIMESTAMP
+                """UPDATE boards SET model=?, mac=?, status=?, updated_at=CURRENT_TIMESTAMP
                 WHERE board_id=?""",
-                (
-                    data["name"], data["model"], data["mac"],
-                    data["gpio_count"], data["working_voltage"], data["status"], board_id,
-                ),
+                (data["model"], data["mac"], data["status"], board_id),
             )
             conn.commit()
             return cursor.rowcount > 0
@@ -677,19 +713,69 @@ class DatabaseManager:
         with self.get_connection() as conn:
             cursor = conn.execute(
                 """UPDATE boards SET
-                mac=?, health_usb_detected=?, health_wifi=?,
+                model=?, mac=?, status='online', health_usb_detected=?, health_wifi=?,
                 health_bluetooth=?, health_hello=?, health_gpio=?, health_pwm=?,
                 health_uart=?, health_spi=?, health_checked_at=CURRENT_TIMESTAMP,
                 updated_at=CURRENT_TIMESTAMP
                 WHERE board_id=?""",
                 (
-                    data["mac"], data["usb_detected"], data["wifi"],
+                    data["model"], data["mac"], data["usb_detected"], data["wifi"],
                     data["bluetooth"], data["hello"], data["gpio"], data["pwm"],
                     data["uart"], data["spi"], board_id,
                 ),
             )
             conn.commit()
             return cursor.rowcount > 0
+
+    def create_board_from_health(self, data: Dict[str, Any]) -> int:
+        with self.get_connection() as conn:
+            conn.execute(
+                """INSERT INTO boards (
+                model, mac, status, health_usb_detected, health_wifi,
+                health_bluetooth, health_hello, health_gpio, health_pwm,
+                health_uart, health_spi, health_checked_at
+                ) VALUES (?, ?, 'online', ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(mac) DO UPDATE SET
+                model=excluded.model, status='online',
+                health_usb_detected=excluded.health_usb_detected,
+                health_wifi=excluded.health_wifi,
+                health_bluetooth=excluded.health_bluetooth,
+                health_hello=excluded.health_hello,
+                health_gpio=excluded.health_gpio,
+                health_pwm=excluded.health_pwm,
+                health_uart=excluded.health_uart,
+                health_spi=excluded.health_spi,
+                health_checked_at=CURRENT_TIMESTAMP,
+                updated_at=CURRENT_TIMESTAMP""",
+                (
+                    data["model"], data["mac"], data["usb_detected"], data["wifi"],
+                    data["bluetooth"], data["hello"], data["gpio"], data["pwm"],
+                    data["uart"], data["spi"],
+                ),
+            )
+            row = conn.execute("SELECT board_id FROM boards WHERE mac=?", (data["mac"],)).fetchone()
+            conn.commit()
+            assert row is not None
+            return int(row["board_id"])
+
+    def refresh_board_statuses(self, online_macs: set[str]) -> List[Dict[str, Any]]:
+        """Refresh reachability while preserving an unresponsive board's broken state."""
+        with self.get_connection() as conn:
+            rows = conn.execute("SELECT board_id, mac, status FROM boards").fetchall()
+            for row in rows:
+                compact_mac = "".join(
+                    character for character in row["mac"] if character in "0123456789abcdefABCDEF"
+                ).upper()
+                next_status = "online" if compact_mac in online_macs else (
+                    "broken" if row["status"] == "broken" else "offline"
+                )
+                if next_status != row["status"]:
+                    conn.execute(
+                        "UPDATE boards SET status=?, updated_at=CURRENT_TIMESTAMP WHERE board_id=?",
+                        (next_status, row["board_id"]),
+                    )
+            conn.commit()
+        return self.list_boards()
 
     def delete_board(self, board_id: int) -> bool:
         with self.get_connection() as conn:
@@ -698,7 +784,7 @@ class DatabaseManager:
             return cursor.rowcount > 0
 
     def list_peripherals(self, board_id: Optional[int] = None) -> List[Dict[str, Any]]:
-        query = """SELECT p.*, b.name AS board_name
+        query = """SELECT p.*, b.model || ' · ' || b.mac AS board_name
             FROM peripherals p JOIN boards b ON b.board_id = p.board_id"""
         params: tuple[Any, ...] = ()
         if board_id is not None:
@@ -711,7 +797,7 @@ class DatabaseManager:
     def get_peripheral(self, peripheral_id: int) -> Optional[Dict[str, Any]]:
         with self.get_connection() as conn:
             row = conn.execute(
-                """SELECT p.*, b.name AS board_name
+                """SELECT p.*, b.model || ' · ' || b.mac AS board_name
                 FROM peripherals p JOIN boards b ON b.board_id = p.board_id
                 WHERE p.peripheral_id = ?""",
                 (peripheral_id,),

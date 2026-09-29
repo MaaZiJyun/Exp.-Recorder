@@ -19,7 +19,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     cache: "no-store",
   });
   if (!response.ok) {
-    let message = `请求失败 (${response.status})`;
+    let message = `Request failed (${response.status})`;
     try {
       const body = await response.json();
       // FastAPI validation errors are arrays of objects. Interpolating those
@@ -39,7 +39,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
           try {
             return JSON.stringify(detail);
           } catch {
-            return "请求参数无效";
+            return "Invalid request parameters";
           }
         }
         return "";

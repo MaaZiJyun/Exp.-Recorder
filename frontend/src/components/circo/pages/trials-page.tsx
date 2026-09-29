@@ -9,6 +9,6 @@ export function TrialsPage({ ctx }: { ctx: RecorderContext }) {
   const { notice, setNotice } = ctx;
   return <>
     <Notice notice={notice} onClose={() => setNotice(null)} />
-    <section className="dashboard-grid manage-layout"><aside className="left-column"><ExperimentIndex ctx={ctx} /></aside><section className="right-column"><TrialsPanel ctx={ctx} /></section></section>
+    <section className="mt-6 grid gap-5 xl:grid-cols-[minmax(280px,0.7fr)_minmax(0,1.6fr)]"><aside className="min-w-0"><ExperimentIndex ctx={ctx} /></aside><section className="min-w-0"><TrialsPanel ctx={ctx} /></section></section>
   </>;
 }

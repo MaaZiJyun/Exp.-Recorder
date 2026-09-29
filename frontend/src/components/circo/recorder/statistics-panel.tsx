@@ -1,6 +1,6 @@
 "use client";
 
-import { Badge, EmptyState, Select } from "@/components/circo/ui";
+import { Badge, EmptyState, Select } from "@/components/circo/primitives";
 import type { RecorderContext } from "@/app/use-recorder";
 
 export function StatisticsPanel({ ctx }: { ctx: RecorderContext }) {
@@ -17,20 +17,20 @@ export function StatisticsPanel({ ctx }: { ctx: RecorderContext }) {
   } = ctx;
 
   return (
-    <section className="panel statistics-panel">
-      <div className="history-header">
+    <section className="min-h-[520px] overflow-hidden rounded-xl border border-zinc-200 bg-white">
+      <div className="flex min-h-16 items-center justify-between gap-4 border-b border-zinc-100 px-5 py-4">
         <div>
-          <div className="section-heading">
-            <span>STATISTICS</span>
-            <h2>Trials by Subject and Position Combination</h2>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-zinc-400">STATISTICS</span>
+            <h2 className="text-base font-semibold">Trials by Subject and Position Combination</h2>
           </div>
-          <p className="statistics-description">
-            每个 Trial 按完整刺激点组合计数，例如 H1A1。
+          <p className="mt-1 text-xs text-zinc-500">
+            Each trial is counted by its complete stimulation-position combination, such as H1A1.
           </p>
         </div>
-        <div className="statistics-controls">
-          <label className="statistics-experiment-select">
-            <span>EXPERIMENT</span>
+        <div className="flex items-end gap-3 max-sm:flex-col max-sm:items-stretch">
+          <label className="flex min-w-56 flex-col gap-1.5 max-sm:min-w-0">
+            <span className="text-[10px] font-semibold tracking-wider text-zinc-500">EXPERIMENT</span>
             <Select
               value={statisticsExperimentId?.toString() ?? ""}
               onChange={(event) => {
@@ -47,7 +47,7 @@ export function StatisticsPanel({ ctx }: { ctx: RecorderContext }) {
                 }
               }}
             >
-              <option value="">选择 Experiment…</option>
+              <option value="">Select an experiment…</option>
               {experiments.map((experiment) => (
                 <option
                   key={experiment.experiment_id}
@@ -63,11 +63,12 @@ export function StatisticsPanel({ ctx }: { ctx: RecorderContext }) {
       </div>
       {statisticSubjects.length > 0 && statisticPositionCombinations.length > 0 ? (
         <>
-          <div className="statistics-legend">
+          <div className="flex flex-wrap gap-x-4 gap-y-2 border-b border-zinc-200 px-5 pb-4">
             {statisticPositionCombinations.map(
               (combination, combinationIndex) => (
-                <span key={combination}>
+                <span className="flex items-center gap-1.5 font-mono text-[10px] font-semibold text-zinc-500" key={combination}>
                   <i
+                    className="size-2.5 rounded-sm"
                     style={{
                       backgroundColor: `hsl(${(combinationIndex * 67) % 360} 45% 48%)`,
                     }}
@@ -77,9 +78,9 @@ export function StatisticsPanel({ ctx }: { ctx: RecorderContext }) {
               ),
             )}
           </div>
-          <div className="statistics-chart-scroll">
+          <div className="overflow-x-auto px-5 pb-5 pt-6">
             <div
-              className="statistics-chart"
+              className="flex h-90 items-stretch gap-4 border-b border-zinc-200 bg-[repeating-linear-gradient(to_top,transparent_0,transparent_59px,#f4f4f5_60px)] px-3"
               style={{
                 minWidth: `${Math.max(
                   720,
@@ -89,8 +90,8 @@ export function StatisticsPanel({ ctx }: { ctx: RecorderContext }) {
               }}
             >
               {statisticSubjects.map((subjectId) => (
-                <div className="statistics-subject" key={subjectId}>
-                  <div className="statistics-bars">
+                <div className="grid min-w-20 flex-1 grid-rows-[minmax(0,1fr)_2.5rem] gap-2" key={subjectId}>
+                  <div className="flex min-h-0 items-end justify-center gap-1 pt-5">
                     {statisticPositionCombinations.map(
                       (combination, combinationIndex) => {
                         const count =
@@ -101,12 +102,13 @@ export function StatisticsPanel({ ctx }: { ctx: RecorderContext }) {
                           )?.trial_count ?? 0;
                         return (
                           <div
-                            className="statistics-bar-slot"
+                            className="relative flex h-full max-w-9 flex-1 flex-col items-stretch justify-end"
                             key={combination}
                             title={`${subjectId} · ${combination}: ${count} trials`}
                           >
-                            <span>{count}</span>
+                            <span className="mb-1 text-center font-mono text-[9px] font-semibold text-zinc-500">{count}</span>
                             <i
+                              className="min-h-0.5 shrink-0 rounded-t-sm opacity-90"
                               style={{
                                 height: `${(count / statisticMaximum) * 100}%`,
                                 backgroundColor: `hsl(${(combinationIndex * 67) % 360} 45% 48%)`,
@@ -117,7 +119,7 @@ export function StatisticsPanel({ ctx }: { ctx: RecorderContext }) {
                       },
                     )}
                   </div>
-                  <strong>{subjectId}</strong>
+                  <strong className="overflow-hidden text-ellipsis whitespace-nowrap text-center font-mono text-[10px] font-semibold text-zinc-950">{subjectId}</strong>
                 </div>
               ))}
             </div>
@@ -126,8 +128,8 @@ export function StatisticsPanel({ ctx }: { ctx: RecorderContext }) {
       ) : (
         <div className="p-4">
           <EmptyState
-            title="暂无统计数据"
-            description="创建 Subject、Position 并完成 Trial 后，统计图会显示在这里。"
+            title="No statistics yet"
+            description="Create subjects and positions, then complete trials to populate this chart."
           />
         </div>
       )}

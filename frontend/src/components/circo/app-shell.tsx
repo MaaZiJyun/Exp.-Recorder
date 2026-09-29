@@ -1,6 +1,8 @@
 "use client";
 
+import Image from "next/image";
 import { BeakerIcon, CircleStackIcon, FunnelIcon } from "@heroicons/react/24/outline";
+import { appConfig } from "@/config/app-config";
 
 export type PageId =
   | "objects"
@@ -16,31 +18,31 @@ export type PageId =
 
 const navigationGroups = [
   {
-    label: "资源",
+    label: "Resources",
     icon: CircleStackIcon,
     items: [
-      ["objects", "对象"],
-      ["materials-tools", "材料/工具"],
-      ["hardware", "硬件"],
-      ["software", "软件"],
+      ["objects", "Objects"],
+      ["materials-tools", "Materials / Tools"],
+      ["hardware", "Hardware"],
+      ["software", "Software"],
     ],
   },
   {
-    label: "筛选",
+    label: "Filters",
     icon: FunnelIcon,
     items: [
-      ["positions", "点位"],
-      ["plans", "计划"],
-      ["trials", "试次"],
-      ["signal-generation", "信号生发"],
+      ["positions", "Positions"],
+      ["plans", "Plans"],
+      ["trials", "Trials"],
+      ["signal-generation", "Signal Generation"],
     ],
   },
   {
-    label: "实测",
+    label: "Operation",
     icon: BeakerIcon,
     items: [
-      ["live-control", "实时控制"],
-      ["logs", "日志"],
+      ["live-control", "Live Control"],
+      ["logs", "Logs"],
     ],
   },
 ] satisfies Array<{ label: string; icon: typeof CircleStackIcon; items: Array<[PageId, string]> }>;
@@ -48,9 +50,16 @@ const navigationGroups = [
 export function AppShell({ activePage, onPageChange, status, children }: { activePage: PageId; onPageChange: (page: PageId) => void; status: React.ReactNode; children: React.ReactNode }) {
   return <div className="flex min-h-dvh bg-white text-zinc-950 lg:h-dvh lg:overflow-hidden">
     <aside className="sticky top-0 z-30 flex h-dvh w-20 shrink-0 flex-col border-r border-zinc-200 bg-zinc-50 p-3 sm:w-64 sm:p-5">
-      <div className="mb-8 hidden px-2 sm:block"><p className="text-2xl font-bold tracking-tight">电信号实验台</p><p className="mt-1 text-xs text-zinc-500">Local control plane</p></div>
-      <div className="mb-6 grid size-11 place-items-center self-center rounded-xl bg-zinc-950 text-sm font-bold text-white sm:hidden">ER</div>
-      <nav className="grid gap-5" aria-label="主导航">
+      <div className="mb-8 hidden items-center gap-3 px-2 sm:flex">
+        <span className="grid size-10 shrink-0 place-items-center rounded-lg border border-zinc-200 bg-white">
+          <Image src={appConfig.icon} width={24} height={24} alt="" priority />
+        </span>
+        <div><p className="text-xl font-bold tracking-tight">{appConfig.name}</p><p className="mt-0.5 text-xs text-zinc-500">{appConfig.tagline}</p></div>
+      </div>
+      <div className="mb-6 grid size-11 place-items-center self-center rounded-lg border border-zinc-200 bg-white sm:hidden">
+        <Image src={appConfig.icon} width={24} height={24} alt={appConfig.name} priority />
+      </div>
+      <nav className="grid gap-5" aria-label="Main navigation">
         {navigationGroups.map((group) => {
           const Icon = group.icon;
           return <section key={group.label} aria-labelledby={`nav-${group.label}`}>

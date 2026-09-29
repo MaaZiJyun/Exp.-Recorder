@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { AppShell, type PageId } from "@/components/circo/app-shell";
-import { Badge } from "@/components/circo/ui";
+import { Badge } from "@/components/circo/primitives";
+import { appConfig } from "@/config/app-config";
 import { HardwarePage } from "@/components/circo/pages/hardware-page";
 import { LiveControlPage } from "@/components/circo/pages/live-control-page";
 import { LogsPage } from "@/components/circo/pages/logs-page";
@@ -62,7 +63,7 @@ export default function Home() {
               : "API OFFLINE"}
           </Badge>
           <p className="text-xs leading-5 text-zinc-500">
-            SQLite · SCPI · USB Serial
+            {appConfig.software.runtime.join(" · ")}
           </p>
         </div>
       }

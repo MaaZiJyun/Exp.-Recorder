@@ -133,7 +133,7 @@ export type SubjectRecord = {
   notes: string | null;
   created_at: string;
   trial_count: number;
-  status: "正常" | "饥饿" | "疲劳";
+  status: "Normal" | "Hungry" | "Fatigued";
 };
 
 export type SpeciesRecord = {

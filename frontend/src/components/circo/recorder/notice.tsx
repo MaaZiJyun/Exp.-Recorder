@@ -1,6 +1,6 @@
 "use client";
 
-import { Alert } from "@/components/circo/ui";
+import { Alert } from "@/components/circo/primitives";
 import type { RecorderContext } from "@/app/use-recorder";
 
 export function Notice({

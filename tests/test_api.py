@@ -103,7 +103,7 @@ class TestExperimentController(unittest.TestCase):
                 )
             )
 
-        with self.assertRaisesRegex(ValueError, "必须不同"):
+        with self.assertRaisesRegex(ValueError, "must be different"):
             self.controller.start_trial(
                 TrialRequest(
                     experiment_id=experiment_id,
@@ -119,7 +119,7 @@ class TestExperimentController(unittest.TestCase):
         second = self.controller.db.create_stimulation_position(
             "C1", image="data:image/png;base64,AQ==", mark={"x": 0.3, "y": 0.4}
         )
-        with self.assertRaisesRegex(ValueError, "同一张图片"):
+        with self.assertRaisesRegex(ValueError, "same image"):
             self.controller.start_trial(
                 TrialRequest(
                     experiment_id=experiment_id,

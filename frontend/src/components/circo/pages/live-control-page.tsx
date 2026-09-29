@@ -15,7 +15,7 @@ import {
 } from "@heroicons/react/24/outline";
 import type { Board } from "@/app/types";
 import { api } from "@/app/lib";
-import { Input, Select } from "@/components/circo/ui";
+import { Input, Select } from "@/components/circo/primitives";
 
 type ActionId = "forward" | "back" | "left" | "right";
 type ActionConfig = {
@@ -54,6 +54,7 @@ type CameraSettings = {
   hmirror: boolean;
   vflip: boolean;
   supportedResolutions: string[];
+  maxFpsByResolution: Record<string, number>;
   limits: {
     fps: [number, number];
     brightness: [number, number];
@@ -88,25 +89,25 @@ const actionMeta: Record<
   { label: string; icon: typeof ArrowUpIcon; position: string; pair: string }
 > = {
   forward: {
-    label: "前进",
+    label: "Forward",
     icon: ArrowUpIcon,
     position: "col-start-2 row-start-1",
     pair: "Chnl1 ↔ Chnl4",
   },
   back: {
-    label: "后退",
+    label: "Back",
     icon: ArrowDownIcon,
     position: "col-start-2 row-start-3",
     pair: "Chnl1 ↔ Chnl4",
   },
   left: {
-    label: "左转",
+    label: "Left",
     icon: ArrowLeftIcon,
     position: "col-start-1 row-start-2",
     pair: "Chnl1 ↔ Chnl3",
   },
   right: {
-    label: "右转",
+    label: "Right",
     icon: ArrowRightIcon,
     position: "col-start-3 row-start-2",
     pair: "Chnl1 ↔ Chnl2",
@@ -119,10 +120,10 @@ const defaultActions: Record<ActionId, ActionConfig> = {
   right: { valid: true, frequencyHz: "50", durationMs: "500", key: "D" },
 };
 const channelLabels = [
-  "Chnl1 · 公共端",
-  "Chnl2 · 右",
-  "Chnl3 · 左",
-  "Chnl4 · 前/后",
+  "Chnl1 · Common",
+  "Chnl2 · Right",
+  "Chnl3 · Left",
+  "Chnl4 · Forward / Back",
 ];
 const pinOptions = Array.from({ length: 11 }, (_, index) => index);
 const shortcutKeys = [
@@ -139,6 +140,10 @@ const shortcutKeys = [
 
 function normalizedMac(value: string) {
   return value.replace(/[^0-9a-f]/gi, "").toUpperCase();
+}
+
+function displayMac(value: string) {
+  return normalizedMac(value).match(/.{1,2}/g)?.join(":") ?? value;
 }
 
 async function imageBlobResolution(blob: Blob): Promise<string | null> {
@@ -215,6 +220,9 @@ export function LiveControlPage({ board }: { board: Board | null }) {
     useState<Record<ActionId, ActionConfig>>(defaultActions);
   const [channels, setChannels] = useState([7, 8, 9, 10]);
   const [endpoint, setEndpoint] = useState<Endpoint | null>(null);
+  const [availableBoards, setAvailableBoards] = useState<Endpoint[]>([]);
+  const [boardPickerOpen, setBoardPickerOpen] = useState(board === null);
+  const [connectingMac, setConnectingMac] = useState<string | null>(null);
   const [controllerConfig, setControllerConfig] =
     useState<ControllerConfig | null>(null);
   const [cameraSettings, setCameraSettings] = useState<CameraSettings | null>(
@@ -233,6 +241,7 @@ export function LiveControlPage({ board }: { board: Board | null }) {
   const [message, setMessage] = useState<string | null>(null);
   const [streamFailed, setStreamFailed] = useState(false);
   const connectionAttempt = useRef(0);
+  const requestedBoard = useRef<string | null | undefined>(undefined);
 
   useEffect(() => {
     const initial = window.setTimeout(() => setNow(new Date()), 0);
@@ -247,12 +256,18 @@ export function LiveControlPage({ board }: { board: Board | null }) {
     if (photo) URL.revokeObjectURL(photo.url);
   }, [photo]);
 
-  const discover = useCallback(async () => {
+  const connectToBoard = useCallback(async (target: Endpoint) => {
     const attempt = ++connectionAttempt.current;
+    setConnectingMac(target.mac);
     setConnectionState("discovering");
-    setMessage(
-      board ? `正在寻找 ${board.model} · ${board.mac}…` : "正在发现局域网主板…",
-    );
+    setMessage(`Connecting to ${target.model ?? "XIAO"} · ${target.ipAddress}…`);
+    setActiveAction(null);
+    if (endpoint) {
+      void fetch(
+        `http://${endpoint.ipAddress}:${endpoint.controlPort}/command?name=stop`,
+        { method: "POST", keepalive: true },
+      ).catch(() => undefined);
+    }
     setEndpoint(null);
     setControllerConfig(null);
     setCameraSettings(null);
@@ -261,38 +276,19 @@ export function LiveControlPage({ board }: { board: Board | null }) {
     setStreamFailed(false);
     setStreamVersion(String(Date.now()));
     try {
-      const response = await api<DiscoveryResponse>("/boards/discover", {
-        method: "POST",
-      });
-      const record = board
-        ? response.discovered.find(
-            (item) => normalizedMac(item.mac) === normalizedMac(board.mac),
-          )
-        : response.discovered[0];
-      if (!record)
-        throw new Error(
-          board ? "未在当前局域网发现所选主板。" : "未发现可控制的在线主板。",
-        );
-      const provisional: Endpoint = {
-        ipAddress: record.ip_address,
-        controlPort: record.control_port ?? 80,
-        videoPort: record.video_port ?? 81,
-        mac: normalizedMac(record.mac),
-        model: record.model ?? board?.model ?? null,
-      };
       const configResponse = await fetch(
-        `http://${provisional.ipAddress}:${provisional.controlPort}/config`,
+        `http://${target.ipAddress}:${target.controlPort}/config`,
         { cache: "no-store" },
       );
       if (!configResponse.ok)
-        throw new Error(`读取板子配置失败 (${configResponse.status})`);
+        throw new Error(`Failed to load board configuration (${configResponse.status})`);
       const config = (await configResponse.json()) as ControllerConfig;
       if (attempt !== connectionAttempt.current) return;
       const resolved = {
-        ...provisional,
+        ...target,
         controlPort: config.controlPort,
         videoPort: config.videoPort,
-        model: config.model || provisional.model,
+        model: config.model || target.model,
       };
       setEndpoint(resolved);
       setControllerConfig(config);
@@ -311,18 +307,19 @@ export function LiveControlPage({ board }: { board: Board | null }) {
           ) as Record<ActionId, ActionConfig>,
       );
       setConnectionState("connected");
-      setMessage(`已连接 ${resolved.model ?? "XIAO"} · ${resolved.ipAddress}`);
+      setMessage(`Connected to ${resolved.model ?? "XIAO"} · ${resolved.ipAddress}`);
+      setBoardPickerOpen(false);
       try {
         const cameraResponse = await fetch(
           `http://${resolved.ipAddress}:${resolved.controlPort}/camera/settings`,
           { cache: "no-store" },
         );
         if (!cameraResponse.ok)
-          throw new Error(`读取摄像头设置失败 (${cameraResponse.status})`);
+          throw new Error(`Failed to load camera settings (${cameraResponse.status})`);
         const settings = (await cameraResponse.json()) as CameraSettings;
         if (attempt === connectionAttempt.current) {
           setCameraSettings(settings);
-          setCameraMessage("摄像头设置已同步。");
+          setCameraMessage("Camera settings synchronized.");
           setCameraError(false);
         }
       } catch (cameraError) {
@@ -330,7 +327,7 @@ export function LiveControlPage({ board }: { board: Board | null }) {
           setCameraMessage(
             cameraError instanceof Error
               ? cameraError.message
-              : "读取摄像头设置失败",
+              : "Failed to load camera settings",
           );
           setCameraError(true);
         }
@@ -338,13 +335,69 @@ export function LiveControlPage({ board }: { board: Board | null }) {
     } catch (error) {
       if (attempt !== connectionAttempt.current) return;
       setConnectionState("error");
-      setMessage(error instanceof Error ? error.message : "主板连接失败");
+      setMessage(error instanceof Error ? error.message : "Board connection failed");
+      setBoardPickerOpen(true);
+    } finally {
+      if (attempt === connectionAttempt.current) setConnectingMac(null);
     }
-  }, [board]);
+  }, [endpoint]);
+
+  const discover = useCallback(async (autoConnectMac?: string | null) => {
+    const attempt = ++connectionAttempt.current;
+    setActiveAction(null);
+    if (endpoint) {
+      void fetch(
+        `http://${endpoint.ipAddress}:${endpoint.controlPort}/command?name=stop`,
+        { method: "POST", keepalive: true },
+      ).catch(() => undefined);
+    }
+    setConnectionState("discovering");
+    setMessage("Discovering controllable boards on the LAN…");
+    setBoardPickerOpen(true);
+    setConnectingMac(null);
+    try {
+      const response = await api<DiscoveryResponse>("/boards/discover", {
+        method: "POST",
+      });
+      if (attempt !== connectionAttempt.current) return;
+      const discovered = response.discovered.map((record) => ({
+        ipAddress: record.ip_address,
+        controlPort: record.control_port ?? 80,
+        videoPort: record.video_port ?? 81,
+        mac: normalizedMac(record.mac),
+        model: record.model,
+      }));
+      setAvailableBoards(discovered);
+      if (autoConnectMac) {
+        const target = discovered.find(
+          (item) => normalizedMac(item.mac) === normalizedMac(autoConnectMac),
+        );
+        if (!target)
+          throw new Error("The selected board was not found on the current LAN.");
+        await connectToBoard(target);
+        return;
+      }
+      setConnectionState(endpoint ? "connected" : "idle");
+      setMessage(
+        discovered.length
+          ? `Found ${discovered.length} controllable board${discovered.length === 1 ? "" : "s"}. Select one to continue.`
+          : "No controllable online boards were found.",
+      );
+    } catch (error) {
+      if (attempt !== connectionAttempt.current) return;
+      setAvailableBoards([]);
+      setConnectionState(endpoint ? "connected" : "error");
+      setMessage(error instanceof Error ? error.message : "Board discovery failed");
+    }
+  }, [connectToBoard, endpoint]);
+
   useEffect(() => {
-    const timer = window.setTimeout(() => void discover(), 0);
+    const targetMac = board?.mac ?? null;
+    if (requestedBoard.current === targetMac) return;
+    requestedBoard.current = targetMac;
+    const timer = window.setTimeout(() => void discover(targetMac), 0);
     return () => window.clearTimeout(timer);
-  }, [discover]);
+  }, [board?.mac, discover]);
 
   const sendStop = useCallback(
     (keepalive = false) => {
@@ -361,9 +414,9 @@ export function LiveControlPage({ board }: { board: Board | null }) {
   const startAction = useCallback(
     async (id: ActionId) => {
       const config = actions[id];
-      if (!endpoint || !config.valid) return;
+      if (!endpoint || !config.valid || boardPickerOpen) return;
       if (new Set(channels).size !== 4) {
-        setMessage("四个控制通道不能重复，请先在设置中修正。");
+        setMessage("The four control channels must be unique. Correct them in Settings first.");
         return;
       }
       const query = new URLSearchParams({
@@ -383,14 +436,14 @@ export function LiveControlPage({ board }: { board: Board | null }) {
         );
         if (!response.ok)
           throw new Error(
-            (await response.text()) || `动作请求失败 (${response.status})`,
+            (await response.text()) || `Action request failed (${response.status})`,
           );
       } catch (error) {
         setActiveAction(null);
-        setMessage(error instanceof Error ? error.message : "动作发送失败");
+        setMessage(error instanceof Error ? error.message : "Failed to send action");
       }
     },
-    [actions, channels, endpoint],
+    [actions, boardPickerOpen, channels, endpoint],
   );
 
   const saveCameraSettings = useCallback(
@@ -401,7 +454,7 @@ export function LiveControlPage({ board }: { board: Board | null }) {
         if (value !== undefined) query.set(key, String(value));
       });
       setCameraSaving(true);
-      setCameraMessage("正在保存摄像头设置…");
+      setCameraMessage("Saving camera settings…");
       setCameraError(false);
       try {
         const response = await fetch(
@@ -413,11 +466,11 @@ export function LiveControlPage({ board }: { board: Board | null }) {
           try {
             const body = JSON.parse(text) as { error?: string };
             throw new Error(
-              body.error || text || `摄像头设置失败 (${response.status})`,
+              body.error || text || `Camera settings update failed (${response.status})`,
             );
           } catch (error) {
             if (error instanceof SyntaxError)
-              throw new Error(text || `摄像头设置失败 (${response.status})`);
+              throw new Error(text || `Camera settings update failed (${response.status})`);
             throw error;
           }
         }
@@ -426,10 +479,10 @@ export function LiveControlPage({ board }: { board: Board | null }) {
           setStreamFailed(false);
           setStreamVersion(String(Date.now()));
         }
-        setCameraMessage("摄像头设置已生效。");
+        setCameraMessage("Camera settings applied.");
       } catch (error) {
         setCameraMessage(
-          error instanceof Error ? error.message : "摄像头设置失败",
+          error instanceof Error ? error.message : "Camera settings update failed",
         );
         setCameraError(true);
       } finally {
@@ -449,13 +502,13 @@ export function LiveControlPage({ board }: { board: Board | null }) {
       if (response.headers.get("X-Stream-Reconnect-Required") === "true") {
         reconnectVersion = response.headers.get("X-Stream-Generation") ?? String(Date.now());
       }
-      if (!response.ok) throw new Error((await response.text()) || `拍照失败 (${response.status})`);
+      if (!response.ok) throw new Error((await response.text()) || `Capture failed (${response.status})`);
       const blob = await response.blob();
-      if (!blob.type.startsWith("image/")) throw new Error(`拍照接口返回了非图片内容：${blob.type || "unknown"}`);
+      if (!blob.type.startsWith("image/")) throw new Error(`The capture endpoint returned non-image content: ${blob.type || "unknown"}`);
       const resolution = response.headers.get("X-Camera-Resolution") ?? await imageBlobResolution(blob);
       setPhoto({ url: URL.createObjectURL(blob), resolution });
     } catch (error) {
-      setPhotoError(error instanceof Error ? error.message : "拍照失败");
+      setPhotoError(error instanceof Error ? error.message : "Capture failed");
     } finally {
       if (reconnectVersion !== null) {
         setStreamFailed(false);
@@ -519,7 +572,7 @@ export function LiveControlPage({ board }: { board: Board | null }) {
 
   const dateText = useMemo(
     () =>
-      now?.toLocaleDateString("zh-CN", {
+      now?.toLocaleDateString("en-US", {
         year: "numeric",
         month: "2-digit",
         day: "2-digit",
@@ -528,7 +581,7 @@ export function LiveControlPage({ board }: { board: Board | null }) {
     [now],
   );
   const timeText = useMemo(
-    () => now?.toLocaleTimeString("zh-CN", { hour12: false }) ?? "--:--:--",
+    () => now?.toLocaleTimeString("en-US", { hour12: false }) ?? "--:--:--",
     [now],
   );
   const streamUrl = endpoint
@@ -556,13 +609,13 @@ export function LiveControlPage({ board }: { board: Board | null }) {
   return (
     <section
       className="relative h-dvh min-h-[640px] overflow-hidden bg-zinc-950 text-white"
-      aria-label="实时控制工作区"
+      aria-label="Live control workspace"
     >
       <div className="absolute inset-0 bg-zinc-950">
         {streamUrl && !streamFailed ? (
           <img
             src={streamUrl}
-            alt="主板摄像头实时画面"
+            alt="Live board camera feed"
             className="size-full object-contain"
             onError={() => setStreamFailed(true)}
           />
@@ -588,24 +641,24 @@ export function LiveControlPage({ board }: { board: Board | null }) {
       </div>
       <div className="absolute right-5 top-5 z-10 flex items-center gap-3 px-4 py-3 sm:right-7 sm:top-7">
         <Battery50Icon className="size-6" />
-        <span className="font-mono text-sm" title="固件暂未提供电量接口">
+        <span className="font-mono text-sm" title="The firmware does not currently provide a battery endpoint">
           --%
         </span>
       </div>
       <div
         className={`absolute left-1/2 top-5 z-20 max-w-[55vw] -translate-x-1/2 rounded-full border px-4 py-2 text-center text-xs backdrop-blur-md ${connectionState === "connected" ? "border-green-500/40 bg-green-950/75 text-green-200" : connectionState === "error" ? "border-red-500/40 bg-red-950/75 text-red-200" : "border-zinc-700 bg-zinc-950/75 text-zinc-300"}`}
       >
-        {message ?? "等待连接"}
+        {message ?? "Waiting for connection"}
       </div>
       <Crosshair />
       {activeAction && (
         <div className="absolute left-1/2 top-[60%] z-10 -translate-x-1/2 rounded-full border border-white/30 bg-zinc-950/75 px-4 py-2 text-xs font-medium text-white backdrop-blur-md">
-          正在执行：{actionMeta[activeAction].label}
+          Active: {actionMeta[activeAction].label}
         </div>
       )}
       {photoCapturing && (
         <div className="absolute left-1/2 top-16 z-30 -translate-x-1/2 rounded-full border border-amber-500/40 bg-amber-950/80 px-4 py-2 text-xs text-amber-200 backdrop-blur-md">
-          正在以最大分辨率拍照，视频画面会短暂停顿…
+          Capturing at maximum resolution. The video may pause briefly…
         </div>
       )}
       {photoError && !photoCapturing && (
@@ -617,8 +670,8 @@ export function LiveControlPage({ board }: { board: Board | null }) {
         <button
           type="button"
           className={hudButtonClass(settingsOpen)}
-          aria-label="设置"
-          title="设置"
+          aria-label="Settings"
+          title="Settings"
           onClick={() => setSettingsOpen((open) => !open)}
         >
           <Cog6ToothIcon className="size-6" />
@@ -627,8 +680,8 @@ export function LiveControlPage({ board }: { board: Board | null }) {
           type="button"
           disabled={!endpoint || photoCapturing}
           className={`${hudButtonClass(photoCapturing)} disabled:cursor-not-allowed disabled:opacity-40`}
-          aria-label="拍照"
-          title="以摄像头最大分辨率拍照"
+          aria-label="Capture photo"
+          title="Capture a photo at the camera's maximum resolution"
           onClick={() => void takePhoto()}
         >
           <CameraIcon className="size-6" />
@@ -646,7 +699,7 @@ export function LiveControlPage({ board }: { board: Board | null }) {
                 type="button"
                 disabled={!endpoint || duplicateChannels}
                 className={`${hudButtonClass(activeAction === id)} ${meta.position} disabled:cursor-not-allowed disabled:opacity-40`}
-                aria-label={`${meta.label}，快捷键 ${actions[id].key}`}
+                aria-label={`${meta.label}, shortcut ${actions[id].key}`}
                 title={`${meta.label} · ${actions[id].key}`}
                 onPointerDown={(event) => {
                   event.preventDefault();
@@ -665,14 +718,93 @@ export function LiveControlPage({ board }: { board: Board | null }) {
           })}
       </div>
 
+      {boardPickerOpen && (
+        <div className="absolute inset-0 z-[60] grid place-items-center bg-black/75 p-5 backdrop-blur-md">
+          <section
+            className="w-full max-w-2xl overflow-hidden rounded-xl border border-zinc-700 bg-zinc-950 shadow-2xl"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Select a controllable board"
+          >
+            <header className="flex items-start justify-between gap-4 border-b border-zinc-800 px-5 py-4">
+              <div>
+                <p className="text-xs uppercase tracking-[.18em] text-zinc-500">Live Control</p>
+                <h2 className="mt-1 text-lg font-semibold">Select a Board</h2>
+                <p className="mt-1 text-xs leading-5 text-zinc-400">
+                  Choose a board discovered on the current LAN before opening the controller.
+                </p>
+              </div>
+              {endpoint && (
+                <button
+                  type="button"
+                  className="grid size-9 shrink-0 place-items-center rounded-md text-zinc-400 hover:bg-zinc-800 hover:text-white"
+                  aria-label="Keep current board"
+                  title="Keep current board"
+                  onClick={() => setBoardPickerOpen(false)}
+                >
+                  <XMarkIcon className="size-5" />
+                </button>
+              )}
+            </header>
+            <div className="p-5">
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <p className={`text-xs ${connectionState === "error" ? "text-red-300" : "text-zinc-400"}`}>
+                  {message ?? "Select a board to continue."}
+                </p>
+                <button
+                  type="button"
+                  disabled={connectionState === "discovering" || connectingMac !== null}
+                  className="inline-flex min-h-9 shrink-0 items-center gap-2 rounded-md border border-zinc-700 px-3 text-xs font-medium text-zinc-200 hover:bg-zinc-800 disabled:opacity-40"
+                  onClick={() => void discover()}
+                >
+                  <ArrowPathIcon className={`size-4 ${connectionState === "discovering" ? "animate-spin" : ""}`} />
+                  Scan Again
+                </button>
+              </div>
+              {availableBoards.length ? (
+                <div className="grid gap-2">
+                  {availableBoards.map((available) => {
+                    const connecting = connectingMac === available.mac;
+                    const current = endpoint?.mac === available.mac;
+                    return (
+                      <button
+                        key={`${available.mac}-${available.ipAddress}`}
+                        type="button"
+                        disabled={connectingMac !== null || connectionState === "discovering"}
+                        className={`grid w-full gap-3 rounded-lg border p-4 text-left transition-colors sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center ${current ? "border-green-700 bg-green-950/30" : "border-zinc-800 bg-zinc-900/60 hover:border-zinc-600 hover:bg-zinc-900"}`}
+                        onClick={() => void connectToBoard(available)}
+                      >
+                        <span className="min-w-0">
+                          <strong className="block truncate text-sm text-zinc-100">{available.model ?? "XIAO ESP32S3"}</strong>
+                          <span className="mt-1 block font-mono text-xs text-zinc-400">{displayMac(available.mac)}</span>
+                        </span>
+                        <span className="text-left font-mono text-xs text-zinc-400 sm:text-right">
+                          <span className="block text-zinc-200">{available.ipAddress}</span>
+                          <span className="mt-1 block">Control {available.controlPort} · Video {available.videoPort}</span>
+                          <span className="mt-1 block text-green-300">{connecting ? "Connecting…" : current ? "Connected" : "Connect"}</span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="grid min-h-36 place-items-center rounded-lg border border-dashed border-zinc-800 px-5 text-center text-sm text-zinc-500">
+                  {connectionState === "discovering" ? "Scanning the LAN for controllable boards…" : "No controllable boards are currently available."}
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
+      )}
+
       {photo && (
         <div className="absolute inset-0 z-50 grid place-items-center bg-black/70 p-5 backdrop-blur-sm">
-          <section className="w-full max-w-5xl overflow-hidden rounded-2xl border border-zinc-700 bg-zinc-950 shadow-2xl" role="dialog" aria-modal="true" aria-label="拍照结果">
+          <section className="w-full max-w-5xl overflow-hidden rounded-2xl border border-zinc-700 bg-zinc-950 shadow-2xl" role="dialog" aria-modal="true" aria-label="Captured photo">
             <header className="flex items-center justify-between gap-4 border-b border-zinc-800 px-5 py-4">
-              <div><h2 className="text-sm font-semibold">拍照结果</h2><p className="mt-1 text-xs text-zinc-400">实际分辨率：{photo.resolution ?? "未提供"}</p></div>
-              <div className="flex items-center gap-2"><a className="inline-flex min-h-9 items-center rounded-lg bg-white px-4 text-xs font-medium text-zinc-950 hover:bg-zinc-200" href={photo.url} download={`camera-${photo.resolution ?? "capture"}.jpg`}>下载照片</a><button type="button" className="grid size-9 place-items-center rounded-lg text-zinc-400 hover:bg-zinc-800 hover:text-white" aria-label="关闭照片" onClick={() => setPhoto(null)}><XMarkIcon className="size-5" /></button></div>
+              <div><h2 className="text-sm font-semibold">Captured Photo</h2><p className="mt-1 text-xs text-zinc-400">Actual resolution: {photo.resolution ?? "Not provided"}</p></div>
+              <div className="flex items-center gap-2"><a className="inline-flex min-h-9 items-center rounded-lg bg-white px-4 text-xs font-medium text-zinc-950 hover:bg-zinc-200" href={photo.url} download={`camera-${photo.resolution ?? "capture"}.jpg`}>Download Photo</a><button type="button" className="grid size-9 place-items-center rounded-lg text-zinc-400 hover:bg-zinc-800 hover:text-white" aria-label="Close photo" onClick={() => setPhoto(null)}><XMarkIcon className="size-5" /></button></div>
             </header>
-            <div className="grid max-h-[75vh] place-items-center overflow-auto bg-black p-3"><img src={photo.url} alt={`摄像头照片 ${photo.resolution ?? ""}`} className="max-h-[70vh] max-w-full object-contain" /></div>
+            <div className="grid max-h-[75vh] place-items-center overflow-auto bg-black p-3"><img src={photo.url} alt={`Camera photo ${photo.resolution ?? ""}`} className="max-h-[70vh] max-w-full object-contain" /></div>
           </section>
         </div>
       )}
@@ -686,12 +818,12 @@ export function LiveControlPage({ board }: { board: Board | null }) {
             <p className="text-xs uppercase tracking-[.2em] text-zinc-400">
               Live Control
             </p>
-            <h2 className="mt-1 text-xl font-semibold">设置</h2>
+            <h2 className="mt-1 text-xl font-semibold">Settings</h2>
           </div>
           <button
             type="button"
             className="grid size-10 place-items-center rounded-lg text-zinc-400 hover:bg-zinc-800 hover:text-white"
-            aria-label="关闭设置"
+            aria-label="Close settings"
             onClick={() => setSettingsOpen(false)}
           >
             <XMarkIcon className="size-6" />
@@ -711,14 +843,14 @@ export function LiveControlPage({ board }: { board: Board | null }) {
               <ArrowPathIcon
                 className={`size-4 ${connectionState === "discovering" ? "animate-spin" : ""}`}
               />
-              重新发现
+              Switch Board
             </button>
           </div>
           <dl className="mt-4 grid gap-2 rounded-xl border border-zinc-800 bg-zinc-900/70 p-4 text-xs">
             <div className="flex justify-between gap-3">
-              <dt className="text-zinc-500">目标主板</dt>
+              <dt className="text-zinc-500">Target board</dt>
               <dd className="text-right">
-                {board ? `${board.model} · ${board.mac}` : "自动选择"}
+                {endpoint ? `${endpoint.model ?? "XIAO"} · ${displayMac(endpoint.mac)}` : "Not connected"}
               </dd>
             </div>
             <div className="flex justify-between gap-3">
@@ -726,7 +858,7 @@ export function LiveControlPage({ board }: { board: Board | null }) {
               <dd>{endpoint?.ipAddress ?? "—"}</dd>
             </div>
             <div className="flex justify-between gap-3">
-              <dt className="text-zinc-500">网络模式</dt>
+              <dt className="text-zinc-500">Network mode</dt>
               <dd>{controllerConfig?.networkMode ?? "—"}</dd>
             </div>
           </dl>
@@ -737,14 +869,14 @@ export function LiveControlPage({ board }: { board: Board | null }) {
               Camera Settings
             </h3>
             {cameraSaving && (
-              <span className="text-xs text-amber-300">保存中…</span>
+              <span className="text-xs text-amber-300">Saving…</span>
             )}
           </div>
           {!cameraSettings ? (
             <p
               className={`mt-3 text-xs leading-5 ${cameraError ? "text-red-300" : "text-zinc-500"}`}
             >
-              {cameraMessage ?? "连接主板后读取摄像头设置。"}
+              {cameraMessage ?? "Connect to a board to load camera settings."}
             </p>
           ) : (
             <div className="mt-4 grid gap-4">
@@ -755,10 +887,14 @@ export function LiveControlPage({ board }: { board: Board | null }) {
                   value={cameraSettings.resolution}
                   onChange={(event) => {
                     const resolution = event.target.value;
+                    const maximumFps =
+                      cameraSettings.maxFpsByResolution[resolution] ??
+                      cameraSettings.limits.fps[1];
+                    const fps = Math.min(cameraSettings.fps, maximumFps);
                     setCameraSettings((current) =>
-                      current ? { ...current, resolution } : current,
+                      current ? { ...current, resolution, fps } : current,
                     );
-                    void saveCameraSettings({ resolution });
+                    void saveCameraSettings({ resolution, fps });
                   }}
                 >
                   {cameraSettings.supportedResolutions.map((resolution) => (
@@ -771,7 +907,12 @@ export function LiveControlPage({ board }: { board: Board | null }) {
               <CameraRange
                 label="FPS"
                 value={cameraSettings.fps}
-                limits={cameraSettings.limits.fps}
+                limits={[
+                  cameraSettings.limits.fps[0],
+                  cameraSettings.maxFpsByResolution[
+                    cameraSettings.resolution
+                  ] ?? cameraSettings.limits.fps[1],
+                ]}
                 disabled={cameraSaving}
                 onPreview={(fps) =>
                   setCameraSettings((current) =>
@@ -861,7 +1002,7 @@ export function LiveControlPage({ board }: { board: Board | null }) {
             Channel Settings
           </h3>
           <p className="mt-3 text-xs leading-5 text-zinc-500">
-            D 编号是 XIAO 板载标签，不是 ESP32 原始 GPIO。四个通道必须互不重复。
+            D numbers are XIAO board labels, not raw ESP32 GPIO numbers. All four channels must be unique.
           </p>
           <div className="mt-4 grid grid-cols-2 gap-3">
             {channelLabels.map((label, index) => (
@@ -888,7 +1029,7 @@ export function LiveControlPage({ board }: { board: Board | null }) {
           </div>
           {duplicateChannels && (
             <p className="mt-3 text-xs text-red-300">
-              通道存在重复，动作控制已禁用。
+              Duplicate channels detected. Action controls are disabled.
             </p>
           )}
         </section>
@@ -897,9 +1038,8 @@ export function LiveControlPage({ board }: { board: Board | null }) {
             Action Settings
           </h3>
           <p className="mt-3 text-xs leading-5 text-zinc-500">
-            Invalid
-            动作不会显示按钮，也不会响应键盘。松开按键或窗口失焦会立即发送
-            stop。
+            Invalid actions do not display a button or respond to the keyboard. Releasing a key or losing window focus sends
+            stop immediately.
           </p>
           <div className="mt-4 grid gap-4">
             {(Object.keys(actionMeta) as ActionId[]).map((id) => {
@@ -933,7 +1073,7 @@ export function LiveControlPage({ board }: { board: Board | null }) {
                   <div className="mt-4 grid gap-3">
                     <div className="grid grid-cols-2 gap-3">
                       <label className="grid gap-1.5 text-xs text-zinc-300">
-                        <span>频率 (Hz)</span>
+                        <span>Frequency (Hz)</span>
                         <Input
                           type="number"
                           min={bounds.minFrequency}
@@ -946,7 +1086,7 @@ export function LiveControlPage({ board }: { board: Board | null }) {
                         />
                       </label>
                       <label className="grid gap-1.5 text-xs text-zinc-300">
-                        <span>刺激时长 (ms)</span>
+                        <span>Stimulation Duration (ms)</span>
                         <Input
                           type="number"
                           min={bounds.minDurationMs}

@@ -1,7 +1,7 @@
 "use client";
 
 import { PlusIcon } from "@heroicons/react/20/solid";
-import { Button, Dialog, Field, Input, Select, Textarea } from "@/components/circo/ui";
+import { Button, Dialog, Field, Input, Select, Textarea } from "@/components/circo/primitives";
 import { api } from "@/app/lib";
 import type { RecorderContext } from "@/app/use-recorder";
 
@@ -21,14 +21,14 @@ export function SpeciesPanel({ ctx }: { ctx: RecorderContext }) {
 
   return (
     <>
-      <section className="panel history-panel subject-records-panel">
-        <div className="history-header">
-          <div className="section-heading">
-            <h2>Species</h2>
+      <section className="min-h-[470px] overflow-hidden rounded-xl border border-zinc-200 bg-white">
+        <div className="flex min-h-16 items-center justify-between gap-4 border-b border-zinc-100 px-5 py-4">
+          <div className="flex items-center">
+            <h2 className="text-base font-semibold">Species</h2>
           </div>
           <Button className="min-h-9 px-3 text-xs" onClick={newSpecies}>
             <PlusIcon className="size-4" />
-            新建 Species
+            New Species
           </Button>
         </div>
         <div className="table-wrap">
@@ -61,7 +61,7 @@ export function SpeciesPanel({ ctx }: { ctx: RecorderContext }) {
                         setEditingSpecies(true);
                       }}
                     >
-                      编辑
+                      Edit
                     </button>{" "}
                     <button
                       type="button"
@@ -71,7 +71,7 @@ export function SpeciesPanel({ ctx }: { ctx: RecorderContext }) {
                         }).then(() => loadSpecies())
                       }
                     >
-                      删除
+                      Delete
                     </button>
                   </td>
                 </tr>
@@ -84,7 +84,7 @@ export function SpeciesPanel({ ctx }: { ctx: RecorderContext }) {
       <Dialog
         open={editingSpecies}
         title={speciesEditorId === null ? "New Species" : "Edit Species"}
-        closeLabel="关闭"
+        closeLabel="Close"
         onClose={() => setEditingSpecies(false)}
       >
         <div className="grid gap-4">
@@ -159,9 +159,9 @@ export function SpeciesPanel({ ctx }: { ctx: RecorderContext }) {
               variant="secondary"
               onClick={() => setEditingSpecies(false)}
             >
-              取消
+              Cancel
             </Button>
-            <Button onClick={() => void saveSpecies()}>保存 Species</Button>
+            <Button onClick={() => void saveSpecies()}>Save Species</Button>
           </div>
         </div>
       </Dialog>
@@ -192,14 +192,14 @@ export function SubjectRecordsPanel({ ctx }: { ctx: RecorderContext }) {
 
   return (
     <>
-      <section className="panel history-panel subject-records-panel">
-        <div className="history-header">
-          <div className="section-heading">
-            <h2>Subject Records</h2>
+      <section className="min-h-[470px] overflow-hidden rounded-xl border border-zinc-200 bg-white">
+        <div className="flex min-h-16 items-center justify-between gap-4 border-b border-zinc-100 px-5 py-4">
+          <div className="flex items-center">
+            <h2 className="text-base font-semibold">Subject Records</h2>
           </div>
           <Button className="min-h-9 px-3 text-xs" onClick={newSubject}>
             <PlusIcon className="size-4" />
-            新建 Subject
+            New Subject
           </Button>
         </div>
         <div className="table-wrap">
@@ -222,7 +222,7 @@ export function SubjectRecordsPanel({ ctx }: { ctx: RecorderContext }) {
               {visibleSubjects.map((subject) => (
                 <tr
                   key={subject.subject_id}
-                  className={subjectStatus(subject) !== "正常" ? "subject-status-muted" : ""}
+                  className={subjectStatus(subject) !== "Normal" ? "text-zinc-400" : ""}
                 >
                   <td>
                     <strong>{subject.subject_id}</strong>
@@ -246,11 +246,11 @@ export function SubjectRecordsPanel({ ctx }: { ctx: RecorderContext }) {
                     <small>{subject.body_weight_g !== null ? "g" : ""}</small>
                   </td>
                   <td>{subject.species || "—"}</td>
-                  <td className={subjectStatus(subject) === "饥饿" ? "subject-status-hungry" : subjectStatus(subject) === "疲劳" ? "subject-status-fatigued" : ""}>{subjectStatus(subject)}</td>
+                  <td className={subjectStatus(subject) === "Hungry" ? "text-red-600" : subjectStatus(subject) === "Fatigued" ? "text-orange-500" : ""}>{subjectStatus(subject)}</td>
                   <td>{subject.trial_count}</td>
                   <td>{subject.created_at?.slice(0, 16) ?? "—"}</td>
                   <td>
-                    <div className="row-actions">
+                    <div className="flex gap-1.5">
                       <button
                         onClick={() =>
                           void api(`/subjects/${subject.subject_id}/feed`, {
@@ -272,7 +272,7 @@ export function SubjectRecordsPanel({ ctx }: { ctx: RecorderContext }) {
                         Test
                       </button>
                       <button onClick={() => editSubject(subject)} disabled={running}>
-                        编辑
+                        Edit
                       </button>
                       <button
                         className="row-delete"
@@ -283,19 +283,19 @@ export function SubjectRecordsPanel({ ctx }: { ctx: RecorderContext }) {
                           subjectDeleting === subject.subject_id
                         }
                       >
-                        {subjectDeleting === subject.subject_id ? "…" : "删除"}
+                        {subjectDeleting === subject.subject_id ? "…" : "Delete"}
                       </button>
                     </div>
-                    {subject.trial_count > 0 && <small>先删除关联 Trial</small>}
+                    {subject.trial_count > 0 && <small>Delete linked trials first</small>}
                   </td>
                 </tr>
               ))}
               {visibleSubjects.length === 0 && (
                 <tr>
-                  <td className="empty-table" colSpan={12}>
+                  <td className="h-40 text-center text-zinc-500" colSpan={12}>
                     {subjects.length === 0
-                      ? "还没有 Subject。"
-                      : "没有匹配的 Subject。"}
+                      ? "No subjects yet."
+                      : "No matching subjects."}
                   </td>
                 </tr>
               )}
@@ -307,7 +307,7 @@ export function SubjectRecordsPanel({ ctx }: { ctx: RecorderContext }) {
       <Dialog
         open={editingSubject}
         title={subjectEditorId === null ? "New Subject" : "Edit Subject"}
-        closeLabel="关闭"
+        closeLabel="Close"
         onClose={() => setEditingSubject(false)}
       >
         <div className="grid gap-5">
@@ -403,7 +403,7 @@ export function SubjectRecordsPanel({ ctx }: { ctx: RecorderContext }) {
                   }))
                 }
               >
-                <option value="">选择已注册物种…</option>
+                <option value="">Select a registered species…</option>
                 {speciesRecords.map((species) => (
                   <option key={species.species_id} value={species.code}>
                     {species.code} · {species.scientific_name}
@@ -429,7 +429,7 @@ export function SubjectRecordsPanel({ ctx }: { ctx: RecorderContext }) {
               />
             </Field>
           </div>
-          <Field label="NOTES" hint="可选：记录样本批次、状态或其他说明。">
+          <Field label="NOTES" hint="Optional: record the specimen batch, status, or other notes.">
             <Textarea
               value={subjectDraft.notes}
               onChange={(event) =>
@@ -446,10 +446,10 @@ export function SubjectRecordsPanel({ ctx }: { ctx: RecorderContext }) {
               variant="secondary"
               onClick={() => setEditingSubject(false)}
             >
-              取消
+              Cancel
             </Button>
             <Button onClick={() => void saveSubject()} disabled={subjectSaving}>
-              {subjectSaving ? "保存中…" : "保存 Subject"}
+              {subjectSaving ? "Saving…" : "Save Subject"}
             </Button>
           </div>
         </div>

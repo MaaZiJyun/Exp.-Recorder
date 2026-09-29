@@ -206,13 +206,13 @@ def _validate_position_image(image: Optional[str]) -> Optional[str]:
     if not image:
         return None
     if not _POSITION_IMAGE_PATTERN.fullmatch(image):
-        raise ValueError("Position image 必须是 PNG、JPEG、WebP 或 GIF 图片。")
+        raise ValueError("Position image must be a PNG, JPEG, WebP, or GIF file.")
     return image
 
 
 def _position_mark(request: StimulationPositionRequest) -> Optional[dict[str, float]]:
     if request.mark is not None and not request.image:
-        raise ValueError("设置 mark 前必须先选择图片。")
+        raise ValueError("Select an image before placing a mark.")
     return request.mark.model_dump() if request.mark is not None else None
 
 
@@ -220,16 +220,16 @@ def _validate_position_pair(
     position: dict[str, Any], position_2: dict[str, Any]
 ) -> None:
     if position["position_id"] == position_2["position_id"]:
-        raise ValueError("两个 Stimulation Position 必须不同。")
+        raise ValueError("The two stimulation positions must be different.")
     if (
         position.get("image_id") is None
         or position_2.get("image_id") is None
         or position.get("mark") is None
         or position_2.get("mark") is None
     ):
-        raise ValueError("两个 Stimulation Position 都必须设置图片和 mark。")
+        raise ValueError("Both stimulation positions must have an image and a mark.")
     if position["image_id"] != position_2["image_id"]:
-        raise ValueError("两个 Stimulation Position 必须使用同一张图片。")
+        raise ValueError("Both stimulation positions must use the same image.")
 
 
 def _is_symmetric_stimulation(high_level_v: float, low_level_v: float, duty_cycle_pct: float) -> bool:
@@ -315,8 +315,8 @@ class ExperimentController:
     def connect_devices(self) -> dict[str, Any]:
         with self._lock:
             if self._task_status == "RUNNING":
-                raise RuntimeError("实验运行中，不能重新连接硬件。")
-        self._append_log("正在重新连接硬件…")
+                raise RuntimeError("Hardware cannot be reconnected while an experiment is running.")
+        self._append_log("Reconnecting hardware…")
         self.sdg.disconnect()
         self.camera.disconnect()
         # The devices are independent. Connecting concurrently prevents a VISA
@@ -327,31 +327,31 @@ class ExperimentController:
             sdg_ok = sdg_future.result()
             camera_ok = camera_future.result()
         self._append_log(
-            f"硬件连接完成：SDG1022X={'成功' if sdg_ok else '失败'}，"
-            f"XIAO={'成功' if camera_ok else '失败'}。"
+            f"Hardware connection complete: SDG1022X={'succeeded' if sdg_ok else 'failed'}, "
+            f"XIAO={'succeeded' if camera_ok else 'failed'}."
         )
         return self.device_status()
 
     def start_trial(self, request: TrialRequest) -> dict[str, Any]:
         with self._lock:
             if self._task_status == "RUNNING":
-                raise RuntimeError("已有实验正在运行。")
+                raise RuntimeError("An experiment is already running.")
             if self._task_status == "COMPLETED" and self._task_result and self._task_result.get("trial_id") is None:
-                raise RuntimeError("请先保存或丢弃上一个待标注 Trial。")
+                raise RuntimeError("Save or discard the previous trial awaiting annotation first.")
             if not self.sdg.is_connected or not self.camera.is_connected:
-                raise RuntimeError("硬件未就绪，请先连接两个设备。")
+                raise RuntimeError("Hardware is not ready. Connect both devices first.")
             if (
                 request.experiment_id is not None
                 and self.db.get_experiment(request.experiment_id) is None
             ):
-                raise ValueError(f"Experiment ID {request.experiment_id} 不存在。")
+                raise ValueError(f"Experiment ID {request.experiment_id} does not exist.")
             subject_id = request.subject_id.strip()
             if self.db.get_subject(subject_id) is None:
-                raise ValueError(f"Subject {subject_id} 不存在，请先在 Manage > Subjects 中创建。")
+                raise ValueError(f"Subject {subject_id} does not exist. Create it under Objects first.")
             position = self.db.get_stimulation_position(request.position_id)
             position_2 = self.db.get_stimulation_position(request.position_2_id)
             if position is None or position_2 is None:
-                raise ValueError("请选择数据库中已标记的 Stimulation Position。")
+                raise ValueError("Select a marked Stimulation Position from the database.")
             _validate_position_pair(position, position_2)
             position, position_2 = _canonical_positions(
                 position,
@@ -364,7 +364,7 @@ class ExperimentController:
             if plan_id is not None:
                 plan = next((item for item in self.db.list_experiment_plans(request.experiment_id or 0) if item["plan_id"] == plan_id), None)
                 if plan is None or plan["completed_trial_count"] >= plan["trial_count"]:
-                    # 计划不存在或已完成时，仍允许手动开始一次 Trial（不关联该计划）。
+                    # A manual trial may still start when the plan is absent or complete; it is not linked to that plan.
                     plan_id = None
                 else:
                     plan_positions = (plan["stimulation_position_id"], plan["stimulation_position_2_id"])
@@ -374,7 +374,7 @@ class ExperimentController:
                         and set(plan_positions) == set(request_positions)
                     )
                     if (plan["subject_id"] != subject_id or not positions_match or plan["stimulation_high_level_v"] != request.high_level_v or plan["stimulation_low_level_v"] != request.low_level_v or plan["stimulation_frequency_hz"] != request.frequency_hz):
-                        raise ValueError("当前 Trial 参数与下一条实验计划不一致。")
+                        raise ValueError("The current trial parameters do not match the next experiment plan.")
 
             subject = Subject(
                 subject_id=subject_id,
@@ -435,7 +435,7 @@ class ExperimentController:
     def commit_pending_trial(self, annotation: AnnotationRequest) -> int:
         with self._lock:
             if self._task_status != "COMPLETED" or not self._task_result:
-                raise RuntimeError("当前没有等待标注的 Trial。")
+                raise RuntimeError("No trial is currently awaiting annotation.")
             result = dict(self._task_result)
             result["response_latency_s"] = annotation.response_latency_s
             result["response_action"] = annotation.response_action
@@ -456,7 +456,7 @@ class ExperimentController:
     def discard_pending_trial(self) -> None:
         with self._lock:
             if self._task_status != "COMPLETED" or not self._task_result:
-                raise RuntimeError("当前没有等待标注的 Trial。")
+                raise RuntimeError("No trial is currently awaiting annotation.")
             video_file = self._task_result.get("video_file")
             if video_file:
                 path = Path(video_file)
@@ -474,7 +474,7 @@ class ExperimentController:
     def clear_data(self) -> dict[str, int]:
         with self._lock:
             if self._task_status == "RUNNING":
-                raise RuntimeError("实验运行中，不能清空数据。")
+                raise RuntimeError("Data cannot be cleared while an experiment is running.")
             result = self.db.clear_all_data()
             self._task_id = None
             self._task_status = "IDLE"
@@ -645,13 +645,13 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
         if experiment_port and port == experiment_port:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="该串口正由实验台 XIAO 使用；库存体检不会占用或断开实验设备。",
+                detail="This serial port is in use by the experiment-rig XIAO. Inventory health checks never claim or disconnect experiment devices.",
             )
         discovered_ports = {item.device for item in XiaoESP32S3HealthCheck.discover()}
         if port not in discovered_ports:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="所选库存板 USB 端口不存在，请重新扫描。",
+                detail="The selected inventory-board USB port does not exist. Scan again.",
             )
 
     @app.get("/api/hardware-health/xiao/ports")
@@ -672,7 +672,7 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
             if not controller.db.update_board_health(board_id, request.model_dump()):
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Board not found")
         except sqlite3.IntegrityError as exc:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="该 MAC 已属于另一块主板") from exc
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This MAC already belongs to another board") from exc
         record = controller.db.get_board(board_id)
         assert record is not None
         return record
@@ -695,8 +695,8 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
             "job_id": job_id,
             "status": "queued",
             "stage": "queued",
-            "message": "体检任务已进入后台队列。",
-            "logs": [{"timestamp": now, "stage": "queued", "message": "体检任务已进入后台队列。"}],
+            "message": "The health-check job was added to the background queue.",
+            "logs": [{"timestamp": now, "stage": "queued", "message": "The health-check job was added to the background queue."}],
             "result": None,
         }
         with health_jobs_lock:
@@ -733,7 +733,7 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
                     current["status"] = "completed"
                     current["result"] = result
             except Exception as exc:
-                report("failed", f"体检任务失败：{exc}")
+                report("failed", f"Health-check job failed: {exc}")
                 with health_jobs_lock:
                     health_jobs[job_id]["status"] = "failed"
 
@@ -860,7 +860,7 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
     @app.put("/api/subjects/{subject_id}")
     def update_subject(subject_id: str, request: SubjectRequest) -> dict[str, Any]:
         if controller.current_task()["status"] == "RUNNING":
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="实验运行中，不能编辑 Subject。")
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Subjects cannot be edited while an experiment is running.")
         try:
             updated = controller.db.update_subject(
                 subject_id,
@@ -885,12 +885,12 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
     @app.delete("/api/subjects/{subject_id}")
     def delete_subject(subject_id: str) -> dict[str, bool]:
         if controller.current_task()["status"] == "RUNNING":
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="实验运行中，不能删除 Subject。")
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Subjects cannot be deleted while an experiment is running.")
         record = controller.db.get_subject(subject_id)
         if record is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subject not found")
         if record["trial_count"]:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="请先删除该 Subject 的所有 Trial。")
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Delete all trials for this subject first.")
         controller.db.delete_subject(subject_id)
         return {"deleted": True}
 
@@ -927,7 +927,7 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
         position_id: int, request: StimulationPositionRequest
     ) -> dict[str, Any]:
         if controller.current_task()["status"] == "RUNNING":
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="实验运行中，不能编辑 Position。")
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Positions cannot be edited while an experiment is running.")
         try:
             updated = controller.db.update_stimulation_position(
                 position_id,
@@ -950,12 +950,12 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
     @app.delete("/api/stimulation-positions/{position_id}")
     def delete_stimulation_position(position_id: int) -> dict[str, bool]:
         if controller.current_task()["status"] == "RUNNING":
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="实验运行中，不能删除 Position。")
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Positions cannot be deleted while an experiment is running.")
         record = controller.db.get_stimulation_position(position_id)
         if record is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Position not found")
         if record["trial_count"]:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="该 Position 已被 Trial 使用，不能删除。")
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This position is used by a trial and cannot be deleted.")
         controller.db.delete_stimulation_position(position_id)
         return {"deleted": True}
 
@@ -997,7 +997,7 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
         if record["trial_count"]:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="请先删除该 Experiment 中的所有 Trial。",
+                detail="Delete all trials in this experiment first.",
             )
         controller.db.delete_experiment(experiment_id)
         return {"deleted": True}
@@ -1011,7 +1011,7 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
         red = controller.db.get_stimulation_position(request.stimulation_position_id)
         black = controller.db.get_stimulation_position(request.stimulation_position_2_id)
         if red is None or black is None:
-            raise HTTPException(status_code=422, detail="请选择两个不同的有效刺激点位。")
+            raise HTTPException(status_code=422, detail="Select two different valid stimulation positions.")
         try:
             _validate_position_pair(red, black)
         except ValueError as exc:
@@ -1025,7 +1025,7 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
         )
         subject_ids = list(dict.fromkeys(item.strip() for item in request.subject_ids if item.strip()))
         if not subject_ids or any(controller.db.get_subject(subject_id) is None for subject_id in subject_ids):
-            raise HTTPException(status_code=422, detail="一个或多个待测实验品不存在。")
+            raise HTTPException(status_code=422, detail="One or more selected subjects do not exist.")
         plan_ids = []
         for subject_id in subject_ids:
             plan_ids.append(controller.db.create_experiment_plan({
@@ -1051,18 +1051,18 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
     @app.delete("/api/experiment-plans/{plan_id}")
     def delete_experiment_plan(plan_id: int) -> dict[str, bool]:
         if not controller.db.delete_experiment_plan(plan_id):
-            raise HTTPException(status_code=404, detail="计划不存在。")
+            raise HTTPException(status_code=404, detail="Plan not found.")
         return {"deleted": True}
 
     @app.put("/api/experiments/{experiment_id}/plans/{plan_id}")
     def update_experiment_plan(experiment_id: int, plan_id: int, request: ExperimentPlanRequest) -> dict[str, Any]:
         if len(request.subject_ids) != 1:
-            raise HTTPException(status_code=422, detail="编辑单条计划时只能选择一个实验品。")
+            raise HTTPException(status_code=422, detail="Select only one subject when editing a single plan.")
         subject_id = request.subject_ids[0]
         red = controller.db.get_stimulation_position(request.stimulation_position_id)
         black = controller.db.get_stimulation_position(request.stimulation_position_2_id)
         if controller.db.get_subject(subject_id) is None or red is None or black is None:
-            raise HTTPException(status_code=422, detail="实验品或刺激点位不存在。")
+            raise HTTPException(status_code=422, detail="The subject or stimulation position does not exist.")
         try:
             _validate_position_pair(red, black)
         except ValueError as exc:
@@ -1089,7 +1089,7 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
             "trial_count": request.trial_count,
         })
         if not updated:
-            raise HTTPException(status_code=404, detail="计划不存在。")
+            raise HTTPException(status_code=404, detail="Plan not found.")
         return next(item for item in controller.db.list_experiment_plans(experiment_id) if item["plan_id"] == plan_id)
 
     @app.get("/api/trials")
@@ -1241,7 +1241,7 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
     @app.put("/api/trials/{trial_id}")
     def update_trial(trial_id: int, request: TrialUpdateRequest) -> dict[str, bool]:
         if controller.current_task()["status"] == "RUNNING":
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="实验运行中，不能编辑记录。")
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Records cannot be edited while an experiment is running.")
         subject_id = request.subject_id.strip()
         controller.db.upsert_subject(subject_id)
         position = controller.db.get_stimulation_position(request.stimulation_position_id)
@@ -1249,7 +1249,7 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
         if position is None or position_2 is None:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="请选择数据库中已标记的 Stimulation Position。",
+                detail="Select a marked Stimulation Position from the database.",
             )
         try:
             _validate_position_pair(position, position_2)
@@ -1279,7 +1279,7 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
     @app.delete("/api/trials/{trial_id}")
     def delete_trial(trial_id: int) -> dict[str, bool]:
         if controller.current_task()["status"] == "RUNNING":
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="实验运行中，不能删除记录。")
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Records cannot be deleted while an experiment is running.")
         record = next(
             (item for item in controller.db.list_trials(limit=100_000) if item["trial_id"] == trial_id),
             None,

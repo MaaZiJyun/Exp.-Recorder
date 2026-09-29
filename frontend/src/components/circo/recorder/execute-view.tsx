@@ -5,7 +5,7 @@ import {
   Cog6ToothIcon,
   QueueListIcon,
 } from "@heroicons/react/20/solid";
-import { Badge, Button, Dialog, EmptyState, Field, Input, Select } from "@/components/circo/ui";
+import { Badge, Button, Dialog, EmptyState, Field, Input, Select } from "@/components/circo/primitives";
 import { responseActions, responseDegrees } from "@/app/constants";
 import type { RecorderContext } from "@/app/use-recorder";
 import { Notice } from "./notice";
@@ -116,11 +116,11 @@ export function ExecuteView({ ctx }: { ctx: RecorderContext }) {
                 );
                 if (
                   selectedSubject &&
-                  subjectStatus(selectedSubject) !== "正常"
+                  subjectStatus(selectedSubject) !== "Normal"
                 ) {
                   setNotice({
                     kind: "error",
-                    text: `警告：${selectedSubject.subject_id} 当前状态为${subjectStatus(selectedSubject)}。`,
+                    text: `Warning: ${selectedSubject.subject_id} is currently ${subjectStatus(selectedSubject)}.`,
                   });
                 }
                 void lookupSubject(subjectId);
@@ -145,7 +145,7 @@ export function ExecuteView({ ctx }: { ctx: RecorderContext }) {
             disabled={connecting || running}
           >
             <ArrowPathIcon className="size-4" />
-            {connecting ? "连接中…" : "重新连接"}
+            {connecting ? "Connecting…" : "Reconnect"}
           </Button>
           <Button
             variant="secondary"
@@ -153,7 +153,7 @@ export function ExecuteView({ ctx }: { ctx: RecorderContext }) {
             disabled={running}
           >
             <Cog6ToothIcon className="size-4" />
-            配置
+            Configure
           </Button>
         </div>
       </section>
@@ -162,8 +162,8 @@ export function ExecuteView({ ctx }: { ctx: RecorderContext }) {
 
       <Dialog
         open={configurationOpen}
-        title="Trial 参数配置"
-        closeLabel="关闭"
+        title="Trial Parameters"
+        closeLabel="Close"
         onClose={() => setConfigurationOpen(false)}
       >
         <div className="grid gap-6">
@@ -285,15 +285,15 @@ export function ExecuteView({ ctx }: { ctx: RecorderContext }) {
             </div>
           </section>
           <div className="flex justify-end">
-            <Button onClick={() => setConfigurationOpen(false)}>完成</Button>
+            <Button onClick={() => setConfigurationOpen(false)}>Done</Button>
           </div>
         </div>
       </Dialog>
 
-      <Dialog open={taskListOpen} title="选择实验任务" closeLabel="关闭" onClose={() => setTaskListOpen(false)}>
+      <Dialog open={taskListOpen} title="Select Experiment Task" closeLabel="Close" onClose={() => setTaskListOpen(false)}>
         <div className="grid gap-3">
           <div className="flex items-center justify-between rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-900">
-            <span>可以自由选择任意未完成的任务，不限制执行顺序。</span>
+            <span>Select any unfinished task in any order.</span>
             <strong>{experimentPlans.reduce((sum, plan) => sum + plan.completed_trial_count, 0)} / {experimentPlans.reduce((sum, plan) => sum + plan.trial_count, 0)}</strong>
           </div>
           <div className="max-h-[60vh] overflow-auto">
@@ -303,31 +303,31 @@ export function ExecuteView({ ctx }: { ctx: RecorderContext }) {
               const symmetric = Math.abs(Math.abs(plan.stimulation_high_level_v) - Math.abs(plan.stimulation_low_level_v)) < 1e-9 && Math.abs(plan.stimulation_duty_cycle_pct - 50) < 1e-9;
               return <button type="button" key={plan.plan_id} disabled={completed || running} onClick={() => { selectExperimentPlan(plan); setTaskListOpen(false); }} className={`w-full rounded-lg border p-3 text-left text-sm transition-colors disabled:cursor-not-allowed ${selected ? "border-blue-500 bg-blue-50" : completed ? "border-emerald-200 bg-emerald-50 text-zinc-500" : "border-zinc-200 bg-white hover:border-blue-300 hover:bg-blue-50/50"}`}>
                 <div className="flex items-center justify-between gap-3"><strong>{completed ? "✓" : selected ? "▶" : "○"} {plan.subject_id} · {plan.stimulation_position}</strong><span>{plan.completed_trial_count}/{plan.trial_count}</span></div>
-                <p className="mt-1 text-xs text-zinc-500">{symmetric ? `点位 ${plan.red_position_code} + ${plan.black_position_code}（无顺序）` : `红 ${plan.red_position_code} · 黑 ${plan.black_position_code}`} · {plan.stimulation_waveform} · {plan.stimulation_low_level_v}→{plan.stimulation_high_level_v} V · {plan.stimulation_frequency_hz} Hz</p>
+                <p className="mt-1 text-xs text-zinc-500">{symmetric ? `Positions ${plan.red_position_code} + ${plan.black_position_code} (unordered)` : `Red ${plan.red_position_code} · Black ${plan.black_position_code}`} · {plan.stimulation_waveform} · {plan.stimulation_low_level_v}→{plan.stimulation_high_level_v} V · {plan.stimulation_frequency_hz} Hz</p>
               </button>;
-            })}</div> : <EmptyState title="暂无实验任务" description="请先在实验页面添加 Plan。" />}
+            })}</div> : <EmptyState title="No experiment tasks" description="Add a plan on the Experiments page first." />}
           </div>
         </div>
       </Dialog>
 
-      <section id="live-control" className="dashboard-grid execute-layout scroll-mt-6">
-        <aside className="left-column">
+      <section id="live-control" className="mt-6 grid scroll-mt-6 gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <aside className="min-w-0">
           {pendingTrial && (
             <div className="">
-              <div className="annotation-title">
+              <div className="mb-4 flex items-center justify-between">
                 <div>
-                  <h3>
+                  <h3 className="text-sm font-semibold">
                     {pendingTrial.subject_id} · Trial{" "}
                     {pendingTrial.trial_no}
                   </h3>
                 </div>
               </div>
-              <div className="annotation-fields">
-                <label className="field">
-                  <span>
+              <div className="grid items-end gap-3 sm:grid-cols-3">
+                <label className="grid gap-1.5 text-sm font-medium text-zinc-800">
+                  <span className="text-[10px] font-semibold tracking-wider text-zinc-500">
                     LATENCY <em>s</em>
                   </span>
-                  <input
+                  <input className="min-h-10 rounded-md border border-zinc-200 bg-white px-3 text-sm outline-none focus:border-zinc-950"
                     type="number"
                     min="0"
                     step="any"
@@ -340,9 +340,9 @@ export function ExecuteView({ ctx }: { ctx: RecorderContext }) {
                     }
                   />
                 </label>
-                <label className="field action-field">
-                  <span>ACTION CODE</span>
-                  <select
+                <label className="grid gap-1.5 text-sm font-medium text-zinc-800">
+                  <span className="text-[10px] font-semibold tracking-wider text-zinc-500">ACTION CODE</span>
+                  <select className="min-h-10 rounded-md border border-zinc-200 bg-white px-3 text-sm outline-none focus:border-zinc-950"
                     value={annotation.action}
                     onChange={(e) =>
                       setAnnotation({
@@ -359,9 +359,9 @@ export function ExecuteView({ ctx }: { ctx: RecorderContext }) {
                     ))}
                   </select>
                 </label>
-                <label className="field">
-                  <span>DEGREE</span>
-                  <select
+                <label className="grid gap-1.5 text-sm font-medium text-zinc-800">
+                  <span className="text-[10px] font-semibold tracking-wider text-zinc-500">DEGREE</span>
+                  <select className="min-h-10 rounded-md border border-zinc-200 bg-white px-3 text-sm outline-none focus:border-zinc-950"
                     value={annotation.degree}
                     onChange={(e) =>
                       setAnnotation({
@@ -381,11 +381,11 @@ export function ExecuteView({ ctx }: { ctx: RecorderContext }) {
               </div>
             </div>
           )}
-          <section className="panel camera-panel">
-            <div className="camera-heading">
-              <div className="section-heading">
-                <span>LIVE</span>
-                <h2>
+          <section className="overflow-hidden rounded-xl border border-zinc-200 bg-white p-4">
+            <div className="mb-3 flex items-start justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium text-zinc-400">LIVE</span>
+                <h2 className="text-sm font-semibold">
                   {pendingTrial
                     ? "Annotation video"
                     : running
@@ -394,38 +394,38 @@ export function ExecuteView({ ctx }: { ctx: RecorderContext }) {
                 </h2>
               </div>
               <div
-                className={`camera-mode ${pendingTrial ? "playback" : running ? "recording" : "idle"}`}
+                className={`inline-flex items-center gap-2 rounded-md border px-2 py-1 text-[10px] font-medium ${running ? "border-red-200 bg-red-50 text-red-700" : "border-zinc-200 bg-zinc-50 text-zinc-600"}`}
               >
-                <i />
+                <i className={`size-1.5 rounded-full ${running ? "animate-pulse bg-red-500" : "bg-zinc-400"}`} />
                 {pendingTrial
                   ? "PLAYBACK"
                   : running
                     ? "REC"
                     : "IDLE · LIVE"}
               </div>
-              <div className="camera-tools">
+              <div className="ml-auto flex gap-1">
                 <button
                   type="button"
-                  className={cameraMirrored ? "active" : ""}
+                  className={`min-h-8 rounded-md border px-2 text-xs ${cameraMirrored ? "border-zinc-950 bg-zinc-950 text-white" : "border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50"}`}
                   onClick={() => setCameraMirrored((value) => !value)}
-                  title="水平镜像"
+                  title="Mirror horizontally"
                 >
-                  镜像
+                  Mirror
                 </button>
                 <button
                   type="button"
-                  className={cameraFlipped ? "active" : ""}
+                  className={`min-h-8 rounded-md border px-2 text-xs ${cameraFlipped ? "border-zinc-950 bg-zinc-950 text-white" : "border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50"}`}
                   onClick={() => setCameraFlipped((value) => !value)}
-                  title="顺时针旋转 90 度"
+                  title="Rotate 90 degrees clockwise"
                 >
-                  旋转90°
+                  Rotate 90°
                 </button>
               </div>
             </div>
             {pendingTrial ? (
-              <div className="playback-pair">
-                <div className="playback-position-pane">
-                  <span className="playback-pane-label">
+              <div className="grid gap-px border border-zinc-200 bg-zinc-200 md:grid-cols-2">
+                <div className="min-w-0 bg-zinc-50 p-3">
+                  <span className="mb-2 block text-[10px] font-medium tracking-wide text-zinc-500">
                     STIMULATION POSITION ·{" "}
                     {pendingTrial.stimulation_position}
                   </span>
@@ -434,8 +434,8 @@ export function ExecuteView({ ctx }: { ctx: RecorderContext }) {
                     positions={positions}
                   />
                 </div>
-                <div className="playback-video-pane">
-                  <span className="playback-pane-label">
+                <div className="min-w-0 bg-zinc-50 p-3">
+                  <span className="mb-2 block text-[10px] font-medium tracking-wide text-zinc-500">
                     VIDEO PLAYBACK
                   </span>
                   <video
@@ -448,16 +448,17 @@ export function ExecuteView({ ctx }: { ctx: RecorderContext }) {
                     controls
                     preload="metadata"
                     src="/backend/pending-trial/video"
+                    className="block aspect-[4/3] w-full bg-zinc-100 object-contain"
                   />
                 </div>
               </div>
             ) : (
-              <div className="camera-viewport">
+              <div className="relative grid aspect-video min-h-0 place-items-center overflow-hidden border border-zinc-800 bg-zinc-950 [&>img]:absolute [&>img]:inset-0 [&>img]:size-full [&>img]:object-contain">
                 {devices?.camera_connected && !devices.mock ? (
                   <img
                     src={`/backend/camera/frame?t=${previewTick}`}
                     alt={
-                      running ? "实验录像实时画面" : "摄像机空闲实时预览"
+                      running ? "Live experiment recording" : "Idle camera preview"
                     }
                     style={{
                       transform:
@@ -466,15 +467,15 @@ export function ExecuteView({ ctx }: { ctx: RecorderContext }) {
                     }}
                   />
                 ) : (
-                  <div className="camera-empty">
+                  <div className="text-center text-zinc-500">
                     <span>◉</span>
                     <p>
                       {devices?.mock ? "SIMULATION MODE" : "CAMERA OFFLINE"}
                     </p>
                     <small>
                       {devices?.mock
-                        ? "真实设备连接后显示实时画面"
-                        : "连接 XIAO ESP32S3 后显示实时画面"}
+                        ? "The live feed appears after a physical device connects"
+                        : "Connect a XIAO ESP32S3 to display the live feed"}
                     </small>
                   </div>
                 )}
@@ -483,10 +484,10 @@ export function ExecuteView({ ctx }: { ctx: RecorderContext }) {
           </section>
         </aside>
 
-        <section className="right-column">
-          <div className="execute-controls">
+        <section className="min-w-0">
+          <div className="grid gap-5">
             {pendingTrial ? (
-              <div className="pending-top-actions">
+              <div className="grid min-h-12 grid-cols-2 gap-2">
                 <Button
                   onClick={() => void savePendingTrial()}
                   disabled={saving}
@@ -521,14 +522,14 @@ export function ExecuteView({ ctx }: { ctx: RecorderContext }) {
                   <span>{running ? "●" : "▶"}</span>
                   {running ? "TRIAL IN PROGRESS" : activeExperimentPlan ? `START TRIAL · ${activeExperimentPlan.completed_trial_count}/${activeExperimentPlan.trial_count}` : "START TRIAL"}
                 </Button>
-                <Button variant="secondary" className="min-h-12 shrink-0 px-3" title="选择实验任务" aria-label="选择实验任务" onClick={() => setTaskListOpen(true)} disabled={!runExperimentId || running}>
+                <Button variant="secondary" className="min-h-12 shrink-0 px-3" title="Select experiment task" aria-label="Select experiment task" onClick={() => setTaskListOpen(true)} disabled={!runExperimentId || running}>
                   <QueueListIcon className="size-5" />
                 </Button>
               </div>
             )}
-            <section className="panel run-position-panel">
-              <div className="run-position-fields">
-                <Field label="POSITION 1" hint="两个位置必须不同。">
+            <section className="flex min-h-0 flex-col rounded-xl border border-zinc-200 bg-white p-5">
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="POSITION 1" hint="The two positions must be different.">
                   <Select
                     value={form.position_id}
                     onChange={(event) => {
@@ -581,8 +582,8 @@ export function ExecuteView({ ctx }: { ctx: RecorderContext }) {
                   label="POSITION 2"
                   hint={
                     positions.length
-                      ? "保存时按顺序拼接 code。"
-                      : "请先在 Manage > Positions 中创建位置。"
+                      ? "Codes are joined in order when saved."
+                      : "Create positions under Filters > Positions first."
                   }
                 >
                   <Select
@@ -615,36 +616,38 @@ export function ExecuteView({ ctx }: { ctx: RecorderContext }) {
                 </Field>
               </div>
               {runPositionPreview?.image ? (
-                <div className="run-position-preview">
-                  <p>
+                <div className="mt-4">
+                  <p className="mb-2 text-[10px] font-medium tracking-wide text-zinc-500">
                     POSITION PREVIEW · {runPositionOne?.code} +{" "}
                     {runPositionTwo?.code}
                   </p>
-                  <div>
+                  <div className="relative w-full overflow-hidden rounded-lg border border-zinc-200 bg-zinc-100">
                     <img
                       src={runPositionPreview.image}
                       alt="Selected stimulation positions"
+                      className="block h-auto w-full"
                     />
                     {[runPositionOne, runPositionTwo].map(
                       (position) =>
                         position?.mark && (
                           <span
                             key={position.position_id}
+                            className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2"
                             style={{
                               left: `${position.mark.x * 100}%`,
                               top: `${position.mark.y * 100}%`,
                             }}
                           >
-                            <i />
-                            <b>{position.code}</b>
+                            <i className="block size-4 rounded-full border-2 border-white bg-red-500 shadow" />
+                            <b className="absolute left-1/2 top-full mt-1 -translate-x-1/2 rounded bg-zinc-950 px-1.5 py-1 text-[10px] leading-none text-white shadow">{position.code}</b>
                           </span>
                         ),
                     )}
                   </div>
                 </div>
               ) : (
-                <div className="run-position-placeholder">
-                  选择同一图片上的两个标记位置后显示预览
+                <div className="mt-4 grid min-h-44 flex-1 place-items-center rounded-lg border border-dashed border-zinc-300 bg-zinc-50 p-5 text-center text-xs text-zinc-500">
+                  Select two marked positions on the same image to show a preview
                 </div>
               )}
             </section>
@@ -652,11 +655,11 @@ export function ExecuteView({ ctx }: { ctx: RecorderContext }) {
         </section>
       </section>
 
-      <section id="experiment-logs" className="panel run-panel run-footer-panel scroll-mt-6">
-        <div className="run-summary">
+      <section id="experiment-logs" className="mt-5 grid scroll-mt-6 gap-5 rounded-xl bg-zinc-950 p-5 text-zinc-100 md:grid-cols-[240px_minmax(0,1fr)]">
+        <div className="flex items-center justify-between">
           <div>
-            <p>CURRENT RUN</p>
-            <h2>
+            <p className="text-[10px] font-medium tracking-[.15em] text-zinc-500">CURRENT RUN</p>
+            <h2 className="mt-1 text-xl font-medium">
               {running
                 ? `Trial ${task.result?.trial_no ?? "in progress"}`
                 : task.status === "IDLE"
@@ -664,33 +667,33 @@ export function ExecuteView({ ctx }: { ctx: RecorderContext }) {
                   : task.status}
             </h2>
           </div>
-          <div className={`run-badge ${task.status.toLowerCase()}`}>
+          <div className="rounded-md border border-zinc-700 px-2 py-1 text-[10px] font-medium text-zinc-300">
             {task.status}
           </div>
         </div>
-        <div className="progress-track">
+        <div className="h-1 overflow-hidden bg-zinc-800 md:col-start-1">
           <span
-            className={
+            className={`block h-full bg-white ${
               running
-                ? "moving"
+                ? "w-2/5 animate-pulse"
                 : task.status === "COMPLETED"
-                  ? "complete"
-                  : ""
-            }
+                  ? "w-full"
+                  : "w-0"
+            }`}
           />
         </div>
         <div
-          className="log-window"
+          className="max-h-48 min-h-32 overflow-y-auto font-mono text-xs leading-6 text-zinc-300 md:col-start-2 md:row-span-2 md:row-start-1"
           ref={logWindowRef}
           role="log"
           aria-live="polite"
         >
           {task.logs.length === 0 ? (
-            <p className="empty-log">System messages will appear here.</p>
+            <p className="text-zinc-600">System messages will appear here.</p>
           ) : (
             task.logs.map((log, index) => (
-              <div className="log-line" key={`${log.timestamp}-${index}`}>
-                <time>{log.timestamp.slice(11, 19)}</time>
+              <div className="grid grid-cols-[5rem_1fr] gap-3" key={`${log.timestamp}-${index}`}>
+                <time className="text-zinc-600">{log.timestamp.slice(11, 19)}</time>
                 <span>{log.message}</span>
               </div>
             ))

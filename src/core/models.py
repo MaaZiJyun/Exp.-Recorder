@@ -58,10 +58,10 @@ class TrialConfig:
         """Reject values that are unsafe for hardware or video filenames."""
         if not _SUBJECT_ID_PATTERN.fullmatch(self.subject.subject_id):
             raise ValueError(
-                "Subject ID 只能包含字母、数字、下划线和连字符，且长度为 1–64。"
+                "Subject ID must be 1–64 characters and contain only letters, numbers, underscores, and hyphens."
             )
         if self.trial_no < 1:
-            raise ValueError("Trial Number 必须大于或等于 1。")
+            raise ValueError("Trial Number must be greater than or equal to 1.")
 
         self.stimulus.waveform = self.stimulus.waveform.upper()
         if self.stimulus.high_level_v is None:
@@ -79,24 +79,24 @@ class TrialConfig:
         }
         for name, value in numeric_values.items():
             if not math.isfinite(value):
-                raise ValueError(f"{name} 必须是有限数字。")
+                raise ValueError(f"{name} must be a finite number.")
 
         if self.stimulus.waveform not in {"SQUARE", "PULSE", "SINE", "RAMP"}:
-            raise ValueError("Waveform 必须是 SQUARE、PULSE、SINE 或 RAMP。")
+            raise ValueError("Waveform must be SQUARE, PULSE, SINE, or RAMP.")
         if self.stimulus.high_level_v <= self.stimulus.low_level_v:
-            raise ValueError("High level 必须大于 Low level。")
+            raise ValueError("High level must be greater than Low level.")
         if not 0 < self.stimulus.duty_cycle_pct < 100:
-            raise ValueError("Duty cycle 必须大于 0 且小于 100%。")
+            raise ValueError("Duty cycle must be greater than 0 and less than 100%.")
         if self.stimulus.frequency_hz <= 0:
-            raise ValueError("Frequency 必须大于 0。")
+            raise ValueError("Frequency must be greater than 0.")
         if self.stimulus.duration_s <= 0:
-            raise ValueError("Duration 必须大于 0。")
+            raise ValueError("Duration must be greater than 0.")
         if self.stimulus.count < 1:
-            raise ValueError("Count 必须大于或等于 1。")
+            raise ValueError("Count must be greater than or equal to 1.")
         if self.stimulus.interval_s < 0:
-            raise ValueError("Interval 不能小于 0。")
+            raise ValueError("Interval cannot be less than 0.")
         if self.timing.baseline_duration_s < 0 or self.timing.post_stim_duration_s < 0:
-            raise ValueError("Baseline 和 Post-stim 不能小于 0。")
+            raise ValueError("Baseline and Post-stim cannot be less than 0.")
 
     def generate_video_id(self, dt: Optional[datetime] = None) -> str:
         """Format: {SubjectID}_T{TrialNo}_{Timestamp} (e.g. B07_T003_20260828_143216)"""

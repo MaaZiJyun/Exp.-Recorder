@@ -1,6 +1,6 @@
 "use client";
 
-import { Button, Dialog, Field, Input, Textarea } from "@/components/circo/ui";
+import { Button, Dialog, Field, Input, Textarea } from "@/components/circo/primitives";
 import type { RecorderContext } from "@/app/use-recorder";
 
 export function ExperimentIndex({ ctx }: { ctx: RecorderContext }) {
@@ -24,50 +24,46 @@ export function ExperimentIndex({ ctx }: { ctx: RecorderContext }) {
 
   return (
     <>
-      <section className="panel experiment-index-panel">
-        <div className="experiment-index-heading">
-          <div className="section-heading">
-            <h2>Experiments</h2>
+      <section className="rounded-xl border border-zinc-200 bg-white p-5">
+        <div className="mb-4 flex items-center justify-between">
+          <div className="flex items-center">
+            <h2 className="text-base font-semibold">Experiments</h2>
           </div>
         </div>
-        <div className="experiment-list">
+        <div className="grid gap-2">
           {visibleExperiments.map((experiment) => (
             <button
               type="button"
               key={experiment.experiment_id}
-              className={
-                managedExperimentId === experiment.experiment_id
-                  ? "active"
-                  : ""
-              }
+              className={`grid min-h-14 w-full grid-cols-[3rem_minmax(0,1fr)_auto] items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm transition-colors ${managedExperimentId === experiment.experiment_id ? "border-zinc-950 bg-zinc-950 text-white" : "border-zinc-200 bg-white hover:bg-zinc-50"}`}
               onClick={() => void selectManagedExperiment(experiment)}
             >
-              <span className="experiment-number">
+              <span className={`font-mono text-xs ${managedExperimentId === experiment.experiment_id ? "text-zinc-400" : "text-zinc-500"}`}>
                 E{String(experiment.experiment_id).padStart(3, "0")}
               </span>
               <strong>{experiment.title}</strong>
-              <small>{experiment.trial_count} trials</small>
+              <small className={managedExperimentId === experiment.experiment_id ? "text-zinc-400" : "text-zinc-500"}>{experiment.trial_count} trials</small>
             </button>
           ))}
           {visibleExperiments.length === 0 && (
-            <div className="empty-experiments">
+            <div className="rounded-lg border border-dashed border-zinc-300 bg-zinc-50 p-6 text-center text-sm leading-6 text-zinc-500">
               {experiments.length === 0 ? (
                 <>
-                  还没有 Experiment
+                  No experiments yet
                   <br />
-                  点击顶部按钮创建第一个。
+                  Use the button above to create the first one.
                 </>
               ) : (
-                "没有匹配的 Experiment。"
+                "No matching experiments."
               )}
             </div>
           )}
         </div>
       </section>
 
-      <section className="panel experiment-editor-panel">
-        <div className="section-heading">
-          <h2>Experiment Details</h2>
+      <section className="rounded-xl border border-zinc-200 bg-white p-5">
+        <div className="mb-4 flex items-center">
+          <h2 className="text-base font-semibold">Experiment Details</h2>
         </div>
         {managedExperiment ? (
           <>
@@ -90,7 +86,7 @@ export function ExperimentIndex({ ctx }: { ctx: RecorderContext }) {
                   setEditingExperiment(true);
                 }}
               >
-                编辑
+                Edit
               </Button>
               <Button
                 variant="danger"
@@ -100,18 +96,18 @@ export function ExperimentIndex({ ctx }: { ctx: RecorderContext }) {
                   experimentDeleting || managedExperiment.trial_count > 0
                 }
               >
-                {experimentDeleting ? "删除中…" : "删除"}
+                {experimentDeleting ? "Deleting…" : "Delete"}
               </Button>
             </div>
             {managedExperiment.trial_count > 0 && (
-              <p className="delete-hint">
-                删除 Experiment 前需要先删除其中的 Trial。
+              <p className="-mt-1 text-[10px] text-amber-700">
+                Delete all trials in this experiment before deleting it.
               </p>
             )}
           </>
         ) : (
           <p className="text-sm text-zinc-500">
-            选择一个 Experiment 查看详情，或点击 NEW 创建。
+            Select an experiment to view its details, or click New to create one.
           </p>
         )}
       </section>
@@ -121,7 +117,7 @@ export function ExperimentIndex({ ctx }: { ctx: RecorderContext }) {
         title={
           experimentEditorId === null ? "New Experiment" : "Edit Experiment"
         }
-        closeLabel="关闭"
+        closeLabel="Close"
         onClose={() => setEditingExperiment(false)}
       >
         <div className="grid gap-5">
@@ -140,7 +136,7 @@ export function ExperimentIndex({ ctx }: { ctx: RecorderContext }) {
           </Field>
           <Field
             label="DESCRIPTION"
-            hint="可选：记录实验目的、批次或协议说明。"
+            hint="Optional: record the experiment purpose, batch, or protocol notes."
           >
             <Textarea
               value={experimentDraft.description}
@@ -158,13 +154,13 @@ export function ExperimentIndex({ ctx }: { ctx: RecorderContext }) {
               variant="secondary"
               onClick={() => setEditingExperiment(false)}
             >
-              取消
+              Cancel
             </Button>
             <Button
               onClick={() => void saveExperiment()}
               disabled={experimentSaving}
             >
-              {experimentSaving ? "保存中…" : "保存 Experiment"}
+              {experimentSaving ? "Saving…" : "Save Experiment"}
             </Button>
           </div>
         </div>

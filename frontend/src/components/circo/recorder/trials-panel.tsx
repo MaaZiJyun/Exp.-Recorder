@@ -1,6 +1,6 @@
 "use client";
 
-import { Button, Dialog, EmptyState } from "@/components/circo/ui";
+import { Button, Dialog, EmptyState } from "@/components/circo/primitives";
 import { responseActions, responseDegrees } from "@/app/constants";
 import { actionLabel, degreeLabel } from "@/app/lib";
 import type { RecorderContext } from "@/app/use-recorder";
@@ -37,8 +37,8 @@ export function TrialsPanel({ ctx }: { ctx: RecorderContext }) {
 
   return (
     <>
-      <section className="panel history-panel trials-history-panel">
-        <div className="history-header items-center justify-between">
+      <section className="flex min-h-[470px] flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white">
+        <div className="flex min-h-16 items-center justify-between gap-4 border-b border-zinc-100 px-5 py-4">
           <div>
             <h2>
               {managedExperiment
@@ -46,14 +46,14 @@ export function TrialsPanel({ ctx }: { ctx: RecorderContext }) {
                 : "Select an Experiment"}
             </h2>
           </div>
-          <div className="history-tools">
+          <div className="flex flex-wrap items-center justify-end gap-2">
             <Button
               variant="secondary"
               className="min-h-9 px-3 text-xs"
               onClick={exportCsv}
               disabled={exporting || !managedExperiment}
             >
-              {exporting ? "导出中…" : "导出 CSV"}
+              {exporting ? "Exporting…" : "Export CSV"}
             </Button>
             <Button
               variant="danger"
@@ -61,7 +61,7 @@ export function TrialsPanel({ ctx }: { ctx: RecorderContext }) {
               onClick={clearData}
               disabled={clearing || running}
             >
-              {clearing ? "清空中…" : "清空数据"}
+              {clearing ? "Clearing…" : "Clear Data"}
             </Button>
           </div>
         </div>
@@ -82,7 +82,7 @@ export function TrialsPanel({ ctx }: { ctx: RecorderContext }) {
             <tbody>
               {trials.map((trial) =>
                 editingId === trial.trial_id && rowEdit ? (
-                  <tr key={trial.trial_id} className="editing-row">
+                  <tr key={trial.trial_id} className="bg-zinc-50 align-top [&_input]:h-8 [&_input]:min-w-18 [&_input]:rounded-md [&_input]:border [&_input]:border-zinc-200 [&_input]:bg-white [&_input]:px-2 [&_input]:text-xs [&_select]:h-8 [&_select]:rounded-md [&_select]:border [&_select]:border-zinc-200 [&_select]:bg-white [&_select]:px-2 [&_select]:text-xs">
                     <td>
                       <input
                         aria-label="Trial number"
@@ -105,7 +105,7 @@ export function TrialsPanel({ ctx }: { ctx: RecorderContext }) {
                       />
                     </td>
                     <td>
-                      <div className="stimulus-edit">
+                      <div className="grid w-68 grid-cols-2 gap-1 [&>select]:col-span-2">
                         <select
                           aria-label="Waveform"
                           value={rowEdit.stimulation_waveform}
@@ -250,7 +250,7 @@ export function TrialsPanel({ ctx }: { ctx: RecorderContext }) {
                       </select>
                     </td>
                     <td>
-                      <div className="response-edit">
+                      <div className="grid w-36 gap-1">
                         <input
                           aria-label="Latency seconds"
                           type="number"
@@ -308,13 +308,13 @@ export function TrialsPanel({ ctx }: { ctx: RecorderContext }) {
                       </div>
                     </td>
                     <td>
-                      <div className="row-actions">
+                      <div className="flex gap-1.5">
                         <Button
                           className="min-h-8 px-2 text-xs"
                           onClick={() => void saveRowEdit()}
                           disabled={rowSaving}
                         >
-                          {rowSaving ? "…" : "保存"}
+                          {rowSaving ? "…" : "Save"}
                         </Button>
                         <Button
                           variant="secondary"
@@ -325,7 +325,7 @@ export function TrialsPanel({ ctx }: { ctx: RecorderContext }) {
                           }}
                           disabled={rowSaving}
                         >
-                          取消
+                          Cancel
                         </Button>
                       </div>
                     </td>
@@ -371,11 +371,11 @@ export function TrialsPanel({ ctx }: { ctx: RecorderContext }) {
                           <small>{degreeLabel(trial.response_degree)}</small>
                         </>
                       ) : (
-                        <span className="muted">Not tagged</span>
+                        <span className="text-zinc-400">Not tagged</span>
                       )}
                     </td>
                     <td>
-                      <div className="row-actions">
+                      <div className="flex gap-1.5">
                         <Button
                           variant="secondary"
                           className="min-h-8 px-2 text-xs"
@@ -385,7 +385,7 @@ export function TrialsPanel({ ctx }: { ctx: RecorderContext }) {
                           }}
                           disabled={running || editingId !== null}
                         >
-                          编辑
+                          Edit
                         </Button>
                         <Button
                           variant="danger"
@@ -400,7 +400,7 @@ export function TrialsPanel({ ctx }: { ctx: RecorderContext }) {
                             editingId !== null
                           }
                         >
-                          {deletingId === trial.trial_id ? "…" : "删除"}
+                          {deletingId === trial.trial_id ? "…" : "Delete"}
                         </Button>
                       </div>
                     </td>
@@ -409,7 +409,7 @@ export function TrialsPanel({ ctx }: { ctx: RecorderContext }) {
               )}
               {trials.length === 0 && (
                 <tr>
-                  <td className="empty-table" colSpan={8}>
+                  <td className="h-40 text-center text-zinc-500" colSpan={8}>
                     No trial records found.
                   </td>
                 </tr>
@@ -418,28 +418,28 @@ export function TrialsPanel({ ctx }: { ctx: RecorderContext }) {
           </table>
         </div>
 
-        <div className={`annotation-drawer ${selected ? "open" : ""}`}>
+        <div className={selected ? "border-t border-zinc-200 bg-zinc-50 p-5" : "hidden"}>
           {selected ? (
             <>
-              <div className="annotation-title">
+              <div className="mb-4 flex items-center justify-between">
                 <div>
-                  <p>RESPONSE ANNOTATION</p>
-                  <h3>
+                  <p className="mb-1 font-mono text-[9px] font-semibold tracking-widest text-zinc-500">RESPONSE ANNOTATION</p>
+                  <h3 className="text-sm font-semibold">
                     {selected
                       ? `${selected.subject_id} · Trial ${selected.trial_no}`
                       : "Select a trial"}
                   </h3>
                 </div>
                 {selected && (
-                  <button onClick={() => setSelected(null)}>×</button>
+                  <button className="grid size-8 place-items-center rounded-md text-xl text-zinc-500 hover:bg-zinc-200 hover:text-zinc-950" onClick={() => setSelected(null)}>×</button>
                 )}
               </div>
-              <div className="annotation-fields">
-                <label className="field">
-                  <span>
+              <div className="grid items-end gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <label className="grid gap-1.5 text-sm font-medium text-zinc-800">
+                  <span className="text-[10px] font-semibold tracking-wider text-zinc-500">
                     LATENCY <em>s</em>
                   </span>
-                  <input
+                  <input className="min-h-10 rounded-md border border-zinc-200 bg-white px-3 text-sm outline-none focus:border-zinc-950"
                     type="number"
                     min="0"
                     step="any"
@@ -453,9 +453,9 @@ export function TrialsPanel({ ctx }: { ctx: RecorderContext }) {
                     }
                   />
                 </label>
-                <label className="field action-field">
-                  <span>ACTION CODE</span>
-                  <select
+                <label className="grid gap-1.5 text-sm font-medium text-zinc-800">
+                  <span className="text-[10px] font-semibold tracking-wider text-zinc-500">ACTION CODE</span>
+                  <select className="min-h-10 rounded-md border border-zinc-200 bg-white px-3 text-sm outline-none focus:border-zinc-950"
                     disabled={!selected}
                     value={annotation.action}
                     onChange={(e) =>
@@ -481,9 +481,9 @@ export function TrialsPanel({ ctx }: { ctx: RecorderContext }) {
                     ))}
                   </select>
                 </label>
-                <label className="field">
-                  <span>DEGREE</span>
-                  <select
+                <label className="grid gap-1.5 text-sm font-medium text-zinc-800">
+                  <span className="text-[10px] font-semibold tracking-wider text-zinc-500">DEGREE</span>
+                  <select className="min-h-10 rounded-md border border-zinc-200 bg-white px-3 text-sm outline-none focus:border-zinc-950"
                     disabled={!selected}
                     value={annotation.degree}
                     onChange={(e) =>
@@ -502,22 +502,22 @@ export function TrialsPanel({ ctx }: { ctx: RecorderContext }) {
                   </select>
                 </label>
                 <Button onClick={saveAnnotation} disabled={!selected || saving}>
-                  {saving ? "保存中…" : "保存标注"}
+                  {saving ? "Saving…" : "Save Annotation"}
                 </Button>
               </div>
-              <details className="response-guide">
-                <summary>查看应对刺激反应动作编号与程度分级</summary>
-                <div className="guide-grid">
+              <details className="mt-4 border-t border-zinc-200 pt-3 text-sm">
+                <summary className="cursor-pointer text-xs font-medium text-zinc-700">View response action codes and severity levels</summary>
+                <div className="grid gap-4 pt-4">
                   <div>
-                    <h4>应对刺激反应动作编号</h4>
-                    <div className="guide-table-wrap">
+                    <h4 className="mb-2 text-sm font-semibold">Stimulus Response Action Codes</h4>
+                    <div className="max-h-64 overflow-auto rounded-md border border-zinc-200 bg-white">
                       <table>
                         <thead>
                           <tr>
-                            <th>编号</th>
-                            <th>动作</th>
-                            <th>英文</th>
-                            <th>定义</th>
+                            <th>CODE</th>
+                            <th>ACTION</th>
+                            <th>ENGLISH</th>
+                            <th>DEFINITION</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -534,15 +534,15 @@ export function TrialsPanel({ ctx }: { ctx: RecorderContext }) {
                     </div>
                   </div>
                   <div>
-                    <h4>反应动作程度分级</h4>
-                    <div className="guide-table-wrap">
+                    <h4 className="mb-2 text-sm font-semibold">Response Severity Levels</h4>
+                    <div className="max-h-64 overflow-auto rounded-md border border-zinc-200 bg-white">
                       <table>
                         <thead>
                           <tr>
-                            <th>评分</th>
-                            <th>反应等级</th>
-                            <th>判定标准</th>
-                            <th>典型表现</th>
+                            <th>SCORE</th>
+                            <th>LEVEL</th>
+                            <th>CRITERIA</th>
+                            <th>TYPICAL BEHAVIOR</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -563,8 +563,8 @@ export function TrialsPanel({ ctx }: { ctx: RecorderContext }) {
             </>
           ) : (
             <EmptyState
-              title="选择一个 Trial"
-              description="从上方表格选择记录后，可查看录像并填写反应标注。"
+              title="Select a Trial"
+              description="Select a record from the table above to view its video and enter a response annotation."
             />
           )}
         </div>
@@ -577,14 +577,14 @@ export function TrialsPanel({ ctx }: { ctx: RecorderContext }) {
             ? `Playback · ${selected.subject_id} · Trial ${selected.trial_no}`
             : "Playback"
         }
-        closeLabel="关闭 Playback"
+        closeLabel="Close Playback"
         onClose={() => setSelected(null)}
         size="wide"
       >
         {selected && (
-          <div className="playback-window-grid">
-            <section>
-              <span className="playback-window-label">
+          <div className="grid items-stretch gap-4 md:grid-cols-[minmax(240px,0.55fr)_minmax(0,1fr)]">
+            <section className="flex min-w-0 flex-col rounded-lg border border-zinc-200 bg-zinc-50 p-3">
+              <span className="mb-2 block font-mono text-[10px] font-semibold tracking-wider text-zinc-500">
                 STIMULATION POSITION · {selected.stimulation_position}
               </span>
               <TrialPositionPreview
@@ -593,9 +593,10 @@ export function TrialsPanel({ ctx }: { ctx: RecorderContext }) {
                 showDetails
               />
             </section>
-            <section>
-              <span className="playback-window-label">VIDEO PLAYBACK</span>
+            <section className="flex min-w-0 flex-col rounded-lg border border-zinc-200 bg-zinc-50 p-3">
+              <span className="mb-2 block font-mono text-[10px] font-semibold tracking-wider text-zinc-500">VIDEO PLAYBACK</span>
               <video
+                className="block aspect-[4/3] w-full bg-zinc-100 object-contain"
                 key={selected.trial_id}
                 controls
                 preload="metadata"

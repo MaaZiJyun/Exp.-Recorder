@@ -854,14 +854,14 @@ class DatabaseManager:
             now = datetime.now(timezone.utc)
             for row in rows:
                 config = species.get(row.get("species")) or {}
-                status = "正常"
+                status = "Normal"
                 try:
                     feeding = datetime.fromisoformat(row["time_since_last_feeding_h"]) if row.get("time_since_last_feeding_h") else None
                     if feeding and feeding.tzinfo is None: feeding = feeding.replace(tzinfo=timezone.utc)
-                    if feeding and config.get("feeding_cycle_h") is not None and (now - feeding).total_seconds() / 3600 > config["feeding_cycle_h"]: status = "饥饿"
+                    if feeding and config.get("feeding_cycle_h") is not None and (now - feeding).total_seconds() / 3600 > config["feeding_cycle_h"]: status = "Hungry"
                     testing = datetime.fromisoformat(row["time_since_last_experiment_h"]) if row.get("time_since_last_experiment_h") else None
                     if testing and testing.tzinfo is None: testing = testing.replace(tzinfo=timezone.utc)
-                    if testing and config.get("rest_cycle_h") is not None and (now - testing).total_seconds() / 3600 < config["rest_cycle_h"]: status = "疲劳"
+                    if testing and config.get("rest_cycle_h") is not None and (now - testing).total_seconds() / 3600 < config["rest_cycle_h"]: status = "Fatigued"
                 except (TypeError, ValueError):
                     pass
                 row["status"] = status

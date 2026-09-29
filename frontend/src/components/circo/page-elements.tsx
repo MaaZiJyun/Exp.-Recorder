@@ -7,5 +7,5 @@ export function SectionHeader({ title, action, subtitle }: { title: string; acti
 }
 
 export function StatCard({ label, value, hint }: { label: string; value: string; hint?: string }) {
-  return <section className="rounded-2xl border border-zinc-200 bg-white p-5"><p className="text-xs font-medium uppercase tracking-wider text-zinc-500">{label}</p><p className="mt-3 text-2xl font-semibold tracking-tight">{value}</p>{hint && <p className="mt-2 text-xs leading-5 text-zinc-500">{hint}</p>}</section>;
+  return <section className="rounded-xl border border-zinc-200 bg-white p-5"><p className="text-xs font-medium uppercase tracking-wider text-zinc-500">{label}</p><p className="mt-3 text-2xl font-semibold tracking-tight">{value}</p>{hint && <p className="mt-2 text-xs leading-5 text-zinc-500">{hint}</p>}</section>;
 }

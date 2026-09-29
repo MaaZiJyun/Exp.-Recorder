@@ -27,7 +27,7 @@ export function Button({
   };
   return (
     <button
-      className={`inline-flex min-h-10 items-center justify-center gap-2 rounded-lg px-4 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${focusRing} ${styles[variant]} ${className}`}
+      className={`inline-flex min-h-10 items-center justify-center gap-2 rounded-md px-4 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${focusRing} ${styles[variant]} ${className}`}
       {...props}
     />
   );
@@ -42,7 +42,7 @@ export function IconButton({
     <button
       aria-label={label}
       title={label}
-      className={`inline-flex size-10 items-center justify-center rounded-lg text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-950 ${focusRing} ${className}`}
+      className={`inline-flex size-10 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-950 ${focusRing} ${className}`}
       {...props}
     />
   );
@@ -56,7 +56,7 @@ export const Input = forwardRef<
     <input
       ref={ref}
       type={type}
-      className={`min-h-11 w-full rounded-lg border border-zinc-200 bg-white px-3 text-sm text-zinc-950 placeholder:text-zinc-400 disabled:bg-zinc-100 disabled:text-zinc-500 ${focusRing} ${className}`}
+      className={`min-h-11 w-full rounded-md border border-zinc-200 bg-white px-3 text-sm text-zinc-950 placeholder:text-zinc-400 disabled:bg-zinc-100 disabled:text-zinc-500 ${focusRing} ${className}`}
       {...props}
     />
   );
@@ -68,7 +68,7 @@ export function Textarea({
 }: TextareaHTMLAttributes<HTMLTextAreaElement>) {
   return (
     <textarea
-      className={`min-h-28 w-full resize-y rounded-lg border border-zinc-200 bg-white px-3 py-2.5 text-sm leading-6 text-zinc-950 placeholder:text-zinc-400 disabled:bg-zinc-100 disabled:text-zinc-500 ${focusRing} ${className}`}
+      className={`min-h-28 w-full resize-y rounded-md border border-zinc-200 bg-white px-3 py-2.5 text-sm leading-6 text-zinc-950 placeholder:text-zinc-400 disabled:bg-zinc-100 disabled:text-zinc-500 ${focusRing} ${className}`}
       {...props}
     />
   );
@@ -81,7 +81,7 @@ export function Select({
   return (
     <span className="relative block w-full">
       <select
-        className={`peer min-h-11 w-full appearance-none rounded-lg border border-zinc-200 bg-white py-2 pl-3 pr-10 text-sm text-zinc-950 transition-colors hover:border-zinc-300 disabled:bg-zinc-100 disabled:opacity-60 ${focusRing} ${className}`}
+        className={`peer min-h-11 w-full appearance-none rounded-md border border-zinc-200 bg-white py-2 pl-3 pr-10 text-sm text-zinc-950 transition-colors hover:border-zinc-300 disabled:bg-zinc-100 disabled:opacity-60 ${focusRing} ${className}`}
         {...props}
       />
       <ChevronDownIcon className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-zinc-400" aria-hidden="true" />
@@ -110,5 +110,5 @@ export function Field({
 }
 
 export function Card({ className = "", children }: { className?: string; children: React.ReactNode }) {
-  return <section className={`rounded-2xl border border-zinc-200 bg-white p-5 ${className}`}>{children}</section>;
+  return <section className={`rounded-xl border border-zinc-200 bg-white p-5 ${className}`}>{children}</section>;
 }

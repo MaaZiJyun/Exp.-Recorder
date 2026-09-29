@@ -1,16 +1,16 @@
 "use client";
 
 import { PlusIcon } from "@heroicons/react/20/solid";
-import { Badge, Button, Dialog, EmptyState, Field, Input, Select, Textarea } from "@/components/circo/ui";
+import { Badge, Button, Dialog, EmptyState, Field, Input, Select, Textarea } from "@/components/circo/primitives";
 import type { RecorderContext } from "@/app/use-recorder";
 
 export function PositionMapPanel({ ctx }: { ctx: RecorderContext }) {
   const { activePositionImage, positions } = ctx;
 
   return (
-    <section className="panel p-4">
-      <div className="section-heading">
-        <h2>Shared Position Map</h2>
+    <section className="rounded-xl border border-zinc-200 bg-white p-4">
+      <div className="mb-4 flex items-center">
+        <h2 className="text-base font-semibold">Shared Position Map</h2>
       </div>
       {activePositionImage?.image ? (
         <div className="grid gap-3">
@@ -43,13 +43,13 @@ export function PositionMapPanel({ ctx }: { ctx: RecorderContext }) {
               ))}
           </div>
           <small className="text-zinc-500">
-            同一图片上的所有 Position marks 会同时显示。
+            All position marks on the same image are shown together.
           </small>
         </div>
       ) : (
         <EmptyState
-          title="还没有位置图片"
-          description="新建 Position 并上传图片后，会在这里显示所有标记。"
+          title="No position image yet"
+          description="Create a position and upload an image to display all marks here."
         />
       )}
     </section>
@@ -81,14 +81,14 @@ export function PositionCardsPanel({ ctx }: { ctx: RecorderContext }) {
 
   return (
     <>
-      <section className="panel history-panel subject-records-panel">
-        <div className="history-header">
-          <div className="section-heading">
-            <h2>Stimulation Positions</h2>
+      <section className="min-h-[470px] overflow-hidden rounded-xl border border-zinc-200 bg-white">
+        <div className="flex min-h-16 items-center justify-between gap-4 border-b border-zinc-100 px-5 py-4">
+          <div className="flex items-center">
+            <h2 className="text-base font-semibold">Stimulation Positions</h2>
           </div>
           <Button className="min-h-9 px-3 text-xs" onClick={newPosition}>
             <PlusIcon className="size-4" />
-            新建 Position
+            New Position
           </Button>
         </div>
         <div className="grid gap-4 p-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -139,7 +139,7 @@ export function PositionCardsPanel({ ctx }: { ctx: RecorderContext }) {
                     onClick={() => editPosition(position)}
                     disabled={running}
                   >
-                    编辑
+                    Edit
                   </Button>
                   <Button
                     variant="danger"
@@ -151,12 +151,12 @@ export function PositionCardsPanel({ ctx }: { ctx: RecorderContext }) {
                       positionDeleting === position.position_id
                     }
                   >
-                    {positionDeleting === position.position_id ? "…" : "删除"}
+                    {positionDeleting === position.position_id ? "…" : "Delete"}
                   </Button>
                 </div>
                 {position.trial_count > 0 && (
                   <small className="text-zinc-500">
-                    已被 Trial 使用，不能删除。
+                    This position is used by a trial and cannot be deleted.
                   </small>
                 )}
               </div>
@@ -166,10 +166,10 @@ export function PositionCardsPanel({ ctx }: { ctx: RecorderContext }) {
             <EmptyState
               title={
                 positions.length === 0
-                  ? "还没有 Position"
-                  : "没有匹配的 Position"
+                  ? "No positions yet"
+                  : "No matching positions"
               }
-              description="创建并标记刺激位置后，才能开始实验。"
+              description="Create and mark stimulation positions before starting an experiment."
             />
           )}
         </div>
@@ -178,13 +178,13 @@ export function PositionCardsPanel({ ctx }: { ctx: RecorderContext }) {
       <Dialog
         open={editingPosition}
         title={positionEditorId === null ? "New Position" : "Edit Position"}
-        closeLabel="关闭"
+        closeLabel="Close"
         onClose={() => setEditingPosition(false)}
       >
         <div className="grid gap-5">
           <Field
             label="CODE"
-            hint="例如 A1；只能使用字母、数字、下划线和连字符。"
+            hint="For example, A1. Use letters, numbers, underscores, and hyphens only."
           >
             <Input
               value={positionDraft.code}
@@ -207,12 +207,12 @@ export function PositionCardsPanel({ ctx }: { ctx: RecorderContext }) {
                   description: event.target.value,
                 }))
               }
-              placeholder="位置说明、解剖标记或操作备注…"
+              placeholder="Position description, anatomical landmark, or handling notes…"
             />
           </Field>
           <Field
             label="SPECIES"
-            hint="该位置及照片仅用于对应物种；留空表示通用。"
+            hint="This position and image apply only to the selected species. Leave blank for a general position."
           >
             <Select
               value={positionDraft.species}
@@ -228,7 +228,7 @@ export function PositionCardsPanel({ ctx }: { ctx: RecorderContext }) {
                 }))
               }
             >
-              <option value="">通用位置</option>
+              <option value="">General position</option>
               {speciesRecords.map((species) => (
                 <option key={species.species_id} value={species.code}>
                   {species.code} · {species.scientific_name}
@@ -238,7 +238,7 @@ export function PositionCardsPanel({ ctx }: { ctx: RecorderContext }) {
           </Field>
           <Field
             label="IMAGE"
-            hint="图片由所选 Species 自动提供。"
+            hint="The image is supplied automatically by the selected species."
             className="hidden"
           >
             {speciesImageOptions.length > 0 && (
@@ -260,7 +260,7 @@ export function PositionCardsPanel({ ctx }: { ctx: RecorderContext }) {
                   }));
                 }}
               >
-                <option value="">选择物种图片…</option>
+                <option value="">Select a species image…</option>
                 {speciesImageOptions.map((species) => (
                   <option key={species.species_id} value={species.species_id}>
                     {species.code} · {species.scientific_name}
@@ -276,7 +276,7 @@ export function PositionCardsPanel({ ctx }: { ctx: RecorderContext }) {
           </Field>
           {positionDraft.image && (
             <div className="grid gap-3">
-              <p className="text-xs text-zinc-500">点击图片设置 mark。</p>
+              <p className="text-xs text-zinc-500">Click the image to place the mark.</p>
               <div className="relative mx-auto w-fit max-w-full overflow-hidden rounded-xl border border-zinc-200">
                 <img
                   src={positionDraft.image}
@@ -313,7 +313,7 @@ export function PositionCardsPanel({ ctx }: { ctx: RecorderContext }) {
                   }))
                 }
               >
-                移除图片
+                Remove Image
               </Button>
             </div>
           )}
@@ -322,13 +322,13 @@ export function PositionCardsPanel({ ctx }: { ctx: RecorderContext }) {
               variant="secondary"
               onClick={() => setEditingPosition(false)}
             >
-              取消
+              Cancel
             </Button>
             <Button
               onClick={() => void savePosition()}
               disabled={positionSaving}
             >
-              {positionSaving ? "保存中…" : "保存 Position"}
+              {positionSaving ? "Saving…" : "Save Position"}
             </Button>
           </div>
         </div>

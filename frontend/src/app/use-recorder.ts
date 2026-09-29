@@ -174,7 +174,7 @@ export function useRecorder() {
     setSpeciesRecords(records);
     return records;
   }, []);
-  const subjectStatus = (subject: SubjectRecord): "正常" | "饥饿" | "疲劳" => {
+  const subjectStatus = (subject: SubjectRecord): "Normal" | "Hungry" | "Fatigued" => {
     const species = speciesRecords.find(
       (item) => item.code === subject.species,
     );
@@ -188,14 +188,14 @@ export function useRecorder() {
       species?.feeding_cycle_h != null &&
       feedingHours > species.feeding_cycle_h
     )
-      return "饥饿";
+      return "Hungry";
     else if (
       testHours !== null &&
       species?.rest_cycle_h != null &&
       testHours < species.rest_cycle_h
     ) {
-      return "疲劳";
-    } else return "正常";
+      return "Fatigued";
+    } else return "Normal";
   };
   const saveSpecies = async () => {
     if (!speciesDraft.code.trim() || !speciesDraft.scientific_name.trim())
@@ -295,7 +295,7 @@ export function useRecorder() {
     setPlanEditorOpen(true);
   };
   const deleteExperimentPlan = async (planId: number) => {
-    if (!managedExperimentId || !window.confirm("删除这条实验计划？已有 Trial 不会被删除。")) return;
+    if (!managedExperimentId || !window.confirm("Delete this experiment plan? Existing trials will not be deleted.")) return;
     await api(`/experiment-plans/${planId}`, { method: "DELETE" });
     await loadExperimentPlans(managedExperimentId);
   };
@@ -351,8 +351,8 @@ export function useRecorder() {
           kind: taskState.status === "COMPLETED" ? "success" : "error",
           text:
             taskState.status === "COMPLETED"
-              ? "实验完成，请填写 RESPONSE ANNOTATION 后保存或丢弃。"
-              : (taskState.result?.error_message ?? "实验失败。"),
+              ? "Experiment complete. Fill in the response annotation, then save or discard it."
+              : (taskState.result?.error_message ?? "Experiment failed."),
         });
       }
       previousTaskStatus.current = taskState.status;
@@ -397,7 +397,7 @@ export function useRecorder() {
           }));
         })
         .catch(() =>
-          setNotice({ kind: "error", text: "无法读取后端默认配置。" }),
+          setNotice({ kind: "error", text: "Unable to load the backend default configuration." }),
         );
     }, 0);
     const timer = window.setInterval(() => void refresh(), 900);
@@ -430,12 +430,12 @@ export function useRecorder() {
           state.sdg_connected && state.camera_connected ? "success" : "error",
         text:
           state.sdg_connected && state.camera_connected
-            ? "所有硬件已连接。"
+            ? "All hardware is connected."
             : [
                 !state.sdg_connected &&
-                  `SDG1022X: ${state.sdg_error || "连接失败"}`,
+                  `SDG1022X: ${state.sdg_error || "Connection failed"}`,
                 !state.camera_connected &&
-                  `XIAO: ${state.camera_error || "连接失败"}`,
+                  `XIAO: ${state.camera_error || "Connection failed"}`,
               ]
                 .filter(Boolean)
                 .join("；"),
@@ -443,7 +443,7 @@ export function useRecorder() {
     } catch (error) {
       setNotice({
         kind: "error",
-        text: error instanceof Error ? error.message : "连接失败",
+        text: error instanceof Error ? error.message : "Connection failed",
       });
     } finally {
       setConnecting(false);
@@ -468,7 +468,7 @@ export function useRecorder() {
     } catch (error) {
       setNotice({
         kind: "error",
-        text: error instanceof Error ? error.message : "无法读取 Trial",
+        text: error instanceof Error ? error.message : "Unable to load trial",
       });
     }
   };
@@ -481,7 +481,7 @@ export function useRecorder() {
 
   const saveExperiment = async () => {
     if (!experimentDraft.title.trim()) {
-      setNotice({ kind: "error", text: "Experiment 标题不能为空。" });
+      setNotice({ kind: "error", text: "Experiment title is required." });
       return;
     }
     setExperimentSaving(true);
@@ -504,12 +504,12 @@ export function useRecorder() {
       if (!runExperimentId) setRunExperimentId(String(record.experiment_id));
       setNotice({
         kind: "success",
-        text: `Experiment “${record.title}” 已保存。`,
+        text: `Experiment “${record.title}” was saved.`,
       });
     } catch (error) {
       setNotice({
         kind: "error",
-        text: error instanceof Error ? error.message : "保存失败",
+        text: error instanceof Error ? error.message : "Save failed",
       });
     } finally {
       setExperimentSaving(false);
@@ -522,7 +522,7 @@ export function useRecorder() {
     );
     if (
       !experiment ||
-      !window.confirm(`确定删除 Experiment “${experiment.title}”？`)
+      !window.confirm(`Delete experiment “${experiment.title}”?`)
     )
       return;
     setExperimentDeleting(true);
@@ -546,12 +546,12 @@ export function useRecorder() {
       else newExperiment();
       setNotice({
         kind: "success",
-        text: `Experiment “${experiment.title}” 已删除。`,
+        text: `Experiment “${experiment.title}” was deleted.`,
       });
     } catch (error) {
       setNotice({
         kind: "error",
-        text: error instanceof Error ? error.message : "删除失败",
+        text: error instanceof Error ? error.message : "Delete failed",
       });
     } finally {
       setExperimentDeleting(false);
@@ -593,7 +593,7 @@ export function useRecorder() {
 
   const saveSubject = async () => {
     if (!subjectDraft.subject_id.trim()) {
-      setNotice({ kind: "error", text: "Subject ID 不能为空。" });
+      setNotice({ kind: "error", text: "Subject ID is required." });
       return;
     }
     setSubjectSaving(true);
@@ -627,12 +627,12 @@ export function useRecorder() {
         setField("subject_id", record.subject_id);
       setNotice({
         kind: "success",
-        text: `Subject “${record.subject_id}” 已保存。`,
+        text: `Subject “${record.subject_id}” was saved.`,
       });
     } catch (error) {
       setNotice({
         kind: "error",
-        text: error instanceof Error ? error.message : "保存失败",
+        text: error instanceof Error ? error.message : "Save failed",
       });
     } finally {
       setSubjectSaving(false);
@@ -640,7 +640,7 @@ export function useRecorder() {
   };
 
   const deleteSubject = async (subject: SubjectRecord) => {
-    if (!window.confirm(`确定删除 Subject “${subject.subject_id}”？`)) return;
+    if (!window.confirm(`Delete subject “${subject.subject_id}”?`)) return;
     setSubjectDeleting(subject.subject_id);
     try {
       await api(`/subjects/${encodeURIComponent(subject.subject_id)}`, {
@@ -649,12 +649,12 @@ export function useRecorder() {
       await loadSubjects();
       setNotice({
         kind: "success",
-        text: `Subject “${subject.subject_id}” 已删除。`,
+        text: `Subject “${subject.subject_id}” was deleted.`,
       });
     } catch (error) {
       setNotice({
         kind: "error",
-        text: error instanceof Error ? error.message : "删除失败",
+        text: error instanceof Error ? error.message : "Delete failed",
       });
     } finally {
       setSubjectDeleting(null);
@@ -687,7 +687,7 @@ export function useRecorder() {
 
   const savePosition = async () => {
     if (!positionDraft.code.trim()) {
-      setNotice({ kind: "error", text: "Position code 不能为空。" });
+      setNotice({ kind: "error", text: "Position code is required." });
       return;
     }
     setPositionSaving(true);
@@ -713,12 +713,12 @@ export function useRecorder() {
       setSelectedPositionImageId(record.image_id);
       setNotice({
         kind: "success",
-        text: `Position “${record.code}” 已保存。`,
+        text: `Position “${record.code}” was saved.`,
       });
     } catch (error) {
       setNotice({
         kind: "error",
-        text: error instanceof Error ? error.message : "保存失败",
+        text: error instanceof Error ? error.message : "Save failed",
       });
     } finally {
       setPositionSaving(false);
@@ -726,7 +726,7 @@ export function useRecorder() {
   };
 
   const deletePosition = async (position: StimulationPosition) => {
-    if (!window.confirm(`确定删除 Position “${position.code}”？`)) return;
+    if (!window.confirm(`Delete position “${position.code}”?`)) return;
     setPositionDeleting(position.position_id);
     try {
       await api(`/stimulation-positions/${position.position_id}`, {
@@ -735,12 +735,12 @@ export function useRecorder() {
       await loadPositions();
       setNotice({
         kind: "success",
-        text: `Position “${position.code}” 已删除。`,
+        text: `Position “${position.code}” was deleted.`,
       });
     } catch (error) {
       setNotice({
         kind: "error",
-        text: error instanceof Error ? error.message : "删除失败",
+        text: error instanceof Error ? error.message : "Delete failed",
       });
     } finally {
       setPositionDeleting(null);
@@ -752,12 +752,12 @@ export function useRecorder() {
     if (!file.type.match(/^image\/(png|jpeg|webp|gif)$/)) {
       setNotice({
         kind: "error",
-        text: "请选择 PNG、JPEG、WebP 或 GIF 图片。",
+        text: "Select a PNG, JPEG, WebP, or GIF image.",
       });
       return;
     }
     if (file.size > 2_000_000) {
-      setNotice({ kind: "error", text: "Position 图片不能超过 2 MB。" });
+      setNotice({ kind: "error", text: "Position images must not exceed 2 MB." });
       return;
     }
     const reader = new FileReader();
@@ -782,7 +782,7 @@ export function useRecorder() {
     ) {
       setNotice({
         kind: "error",
-        text: "请选择同一张图片上两个不同且已设置 mark 的 Stimulation Position。",
+        text: "Select two different marked stimulation positions on the same image.",
       });
       return;
     }
@@ -816,7 +816,7 @@ export function useRecorder() {
     } catch (error) {
       setNotice({
         kind: "error",
-        text: error instanceof Error ? error.message : "无法开始实验",
+        text: error instanceof Error ? error.message : "Unable to start experiment",
       });
     }
   };
@@ -908,11 +908,11 @@ export function useRecorder() {
       if (selected?.trial_id === editingId) setSelected(null);
       setEditingId(null);
       setRowEdit(null);
-      setNotice({ kind: "success", text: `Trial #${editingId} 已更新。` });
+      setNotice({ kind: "success", text: `Trial #${editingId} was updated.` });
     } catch (error) {
       setNotice({
         kind: "error",
-        text: error instanceof Error ? error.message : "更新失败",
+        text: error instanceof Error ? error.message : "Update failed",
       });
     } finally {
       setRowSaving(false);
@@ -920,7 +920,7 @@ export function useRecorder() {
   };
 
   const deleteRow = async (trial: Trial) => {
-    if (!window.confirm(`确定删除 Trial #${trial.trial_id}？录像文件将保留。`))
+    if (!window.confirm(`Delete trial #${trial.trial_id}? The video file will be retained.`))
       return;
     setDeletingId(trial.trial_id);
     try {
@@ -938,12 +938,12 @@ export function useRecorder() {
       ]);
       setNotice({
         kind: "success",
-        text: `Trial #${trial.trial_id} 已删除，录像文件已保留。`,
+        text: `Trial #${trial.trial_id} was deleted. The video file was retained.`,
       });
     } catch (error) {
       setNotice({
         kind: "error",
-        text: error instanceof Error ? error.message : "删除失败",
+        text: error instanceof Error ? error.message : "Delete failed",
       });
     } finally {
       setDeletingId(null);
@@ -965,12 +965,12 @@ export function useRecorder() {
       await loadTrials(filterRef.current, managedExperimentRef.current);
       setNotice({
         kind: "success",
-        text: `Trial #${selected.trial_id} 标注已保存。`,
+        text: `Annotations for trial #${selected.trial_id} were saved.`,
       });
     } catch (error) {
       setNotice({
         kind: "error",
-        text: error instanceof Error ? error.message : "保存失败",
+        text: error instanceof Error ? error.message : "Save failed",
       });
     } finally {
       setSaving(false);
@@ -998,11 +998,11 @@ export function useRecorder() {
         loadPositions(),
       ]);
       if (runExperimentId) await selectRunExperiment(runExperimentId);
-      setNotice({ kind: "success", text: "Trial 标注已保存到数据库。" });
+      setNotice({ kind: "success", text: "Trial annotations were saved to the database." });
     } catch (error) {
       setNotice({
         kind: "error",
-        text: error instanceof Error ? error.message : "保存失败",
+        text: error instanceof Error ? error.message : "Save failed",
       });
     } finally {
       setSaving(false);
@@ -1010,18 +1010,18 @@ export function useRecorder() {
   };
 
   const discardPendingTrial = async () => {
-    if (!pendingTrial || !window.confirm("丢弃本次 Trial？录像也会被删除。"))
+    if (!pendingTrial || !window.confirm("Discard this trial? Its video will also be deleted."))
       return;
     setSaving(true);
     try {
       await api("/trials/current/discard", { method: "POST" });
       setPendingTrial(null);
       setTask((current) => ({ ...current, status: "IDLE", result: null }));
-      setNotice({ kind: "success", text: "本次 Trial 已丢弃。" });
+      setNotice({ kind: "success", text: "The trial was discarded." });
     } catch (error) {
       setNotice({
         kind: "error",
-        text: error instanceof Error ? error.message : "丢弃失败",
+        text: error instanceof Error ? error.message : "Discard failed",
       });
     } finally {
       setSaving(false);
@@ -1041,7 +1041,7 @@ export function useRecorder() {
       const response = await fetch(`/backend/trials/export${query}`, {
         cache: "no-store",
       });
-      if (!response.ok) throw new Error(`CSV 导出失败 (${response.status})`);
+      if (!response.ok) throw new Error(`CSV export failed (${response.status})`);
       const blob = await response.blob();
       const disposition = response.headers.get("Content-Disposition") ?? "";
       const filename =
@@ -1054,11 +1054,11 @@ export function useRecorder() {
       link.click();
       link.remove();
       URL.revokeObjectURL(url);
-      setNotice({ kind: "success", text: "CSV 已导出。" });
+      setNotice({ kind: "success", text: "CSV exported." });
     } catch (error) {
       setNotice({
         kind: "error",
-        text: error instanceof Error ? error.message : "CSV 导出失败",
+        text: error instanceof Error ? error.message : "CSV export failed",
       });
     } finally {
       setExporting(false);
@@ -1067,7 +1067,7 @@ export function useRecorder() {
 
   const clearData = async () => {
     const confirmed = window.confirm(
-      "确定清空所有 Experiment、Trial 和 Subject 数据吗？此操作无法撤销。data/videos/ 中的视频文件会保留。",
+      "Clear all experiment, trial, and subject data? This action cannot be undone. Video files in data/videos/ will be retained.",
     );
     if (!confirmed) return;
     setClearing(true);
@@ -1090,12 +1090,12 @@ export function useRecorder() {
       previousTaskStatus.current = "IDLE";
       setNotice({
         kind: "success",
-        text: `已清空 ${result.experiments_deleted} 个 Experiment、${result.trials_deleted} 条 Trial 和 ${result.subjects_deleted} 个 Subject；视频文件已保留。`,
+        text: `Cleared ${result.experiments_deleted} experiments, ${result.trials_deleted} trials, and ${result.subjects_deleted} subjects. Video files were retained.`,
       });
     } catch (error) {
       setNotice({
         kind: "error",
-        text: error instanceof Error ? error.message : "清空失败",
+        text: error instanceof Error ? error.message : "Clear failed",
       });
     } finally {
       setClearing(false);

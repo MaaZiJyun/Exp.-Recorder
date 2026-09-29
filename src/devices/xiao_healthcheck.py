@@ -39,28 +39,28 @@ class XiaoESP32S3HealthCheck:
     INTERFACE_TESTS = {
         "gpio": {
             "command": "HEALTH_GPIO",
-            "title": "GPIO 数字回环",
-            "instruction": "断电后用杜邦线连接 D0 与 D1，再重新上电。",
+            "title": "GPIO Digital Loopback",
+            "instruction": "Power off the board, connect D0 and D1 with a jumper wire, then power it on again.",
         },
         "pwm": {
             "command": "HEALTH_PWM",
-            "title": "PWM 输出",
-            "instruction": "断电后用杜邦线连接 D2 与 D3，再重新上电。",
+            "title": "PWM Output",
+            "instruction": "Power off the board, connect D2 and D3 with a jumper wire, then power it on again.",
         },
         "uart": {
             "command": "HEALTH_UART",
-            "title": "UART 回环",
-            "instruction": "断电后用杜邦线连接 D6/TX 与 D7/RX，再重新上电。",
+            "title": "UART Loopback",
+            "instruction": "Power off the board, connect D6/TX and D7/RX with a jumper wire, then power it on again.",
         },
         "spi": {
             "command": "HEALTH_SPI",
-            "title": "SPI 回环",
-            "instruction": "断电后用杜邦线连接 D10/MOSI 与 D9/MISO，再重新上电；D8/SCK 由控制器初始化。",
+            "title": "SPI Loopback",
+            "instruction": "Power off the board, connect D10/MOSI and D9/MISO with a jumper wire, then power it on again. D8/SCK is initialized by the controller.",
         },
         "i2c": {
             "command": "HEALTH_I2C",
-            "title": "I²C 外设扫描（需要模块，可跳过）",
-            "instruction": "这项不能只用跳线自测。XIAO 两侧是金属焊盘/排针位：把模块 SDA 接到板上标注 D4 的焊盘，SCL 接到 D5，VCC 接 3V3，GND 接任意一个标注 GND 的接地焊盘。若板上未焊排针，需要先焊接排针或测试线；没有 I²C 模块时请直接跳过。切勿把 D4 与 D5 短接。",
+            "title": "I²C Peripheral Scan (module required; optional)",
+            "instruction": "This test cannot be performed with only a loopback wire. The XIAO has metal pads/header positions along both sides: connect the module's SDA to the pad labeled D4, SCL to D5, VCC to 3V3, and GND to any pad labeled GND. If headers are not installed, solder headers or test leads first. Skip this test if no I²C module is available. Never short D4 and D5 together.",
         },
     }
 
@@ -126,7 +126,7 @@ class XiaoESP32S3HealthCheck:
         if not self.arduino_cli:
             return {
                 "passed": False,
-                "detail": "未找到 arduino-cli，无法烧录体检固件。",
+                "detail": "arduino-cli was not found, so the diagnostic firmware cannot be flashed.",
             }
         command = [
             self.arduino_cli,
@@ -139,7 +139,7 @@ class XiaoESP32S3HealthCheck:
             str(self.sketch_dir),
         ]
         if progress:
-            progress("flash", "正在编译并烧录 XIAO ESP32S3 体检固件…")
+            progress("flash", "Compiling and flashing XIAO ESP32S3 diagnostic firmware…")
         try:
             process = subprocess.Popen(
                 command,
@@ -177,11 +177,11 @@ class XiaoESP32S3HealthCheck:
                         progress("flash", message)
             return_code = process.wait(timeout=max(1.0, timeout - (time.monotonic() - started_at)))
         except (OSError, subprocess.TimeoutExpired) as exc:
-            return {"passed": False, "detail": f"烧录体检固件失败：{exc}"}
+            return {"passed": False, "detail": f"Failed to flash diagnostic firmware: {exc}"}
         output = "\n".join(output_lines)
         return {
             "passed": return_code == 0,
-            "detail": "体检固件烧录成功。" if return_code == 0 else output[-2000:],
+            "detail": "Diagnostic firmware flashed successfully." if return_code == 0 else output[-2000:],
         }
 
     def command(self, port: str, command: str, timeout: float = 8.0) -> dict[str, Any]:
@@ -220,14 +220,14 @@ class XiaoESP32S3HealthCheck:
                 return {
                     "passed": False,
                     "test": command,
-                    "detail": "体检固件无响应；请确认烧录成功并重新选择 USB 端口。",
+                    "detail": "The diagnostic firmware did not respond. Confirm that flashing succeeded and select the USB port again.",
                     "raw": "\n".join(lines[-10:]),
                 }
         except Exception as exc:
             return {
                 "passed": False,
                 "test": command,
-                "detail": f"无法打开库存板串口 {port}：{exc}",
+                "detail": f"Unable to open inventory-board serial port {port}: {exc}",
                 "raw": "",
             }
 
@@ -239,7 +239,7 @@ class XiaoESP32S3HealthCheck:
         progress: Optional[ProgressCallback] = None,
     ) -> dict[str, Any]:
         if progress:
-            progress("usb", f"正在扫描库存板 USB 端口：{port}")
+            progress("usb", f"Scanning inventory-board USB port: {port}")
         ports = {item.device: item for item in self.discover()}
         usb = ports.get(port)
         checks: dict[str, Any] = {
@@ -252,17 +252,17 @@ class XiaoESP32S3HealthCheck:
             return {"port": port, "checks": checks, "steps": self.steps()}
         if flash:
             if progress:
-                progress("firmware_probe", "正在检查板上是否已经运行体检固件…")
+                progress("firmware_probe", "Checking whether diagnostic firmware is already running on the board…")
             probe = self.command(port, "PING", timeout=2.5)
             already_installed = probe["passed"] and probe.get("detail") == self.FIRMWARE_ID
             if already_installed:
                 checks["flash"] = {
                     "passed": True,
                     "skipped": True,
-                    "detail": "已检测到体检固件，本次跳过烧录。",
+                    "detail": "Diagnostic firmware detected; flashing was skipped.",
                 }
                 if progress:
-                    progress("firmware_probe", "已检测到体检固件，跳过编译和烧录。")
+                    progress("firmware_probe", "Diagnostic firmware detected; compilation and flashing skipped.")
             else:
                 checks["flash"] = self.flash(port, progress=progress)
             if not checks["flash"]["passed"]:
@@ -270,7 +270,7 @@ class XiaoESP32S3HealthCheck:
             if not already_installed:
                 time.sleep(1.0)
         if progress:
-            progress("identity", "正在读取产品名称、硬件 MAC 和无线能力…")
+            progress("identity", "Reading the product name, hardware MAC, and wireless capabilities…")
         identity = self.command(port, "HEALTH_INFO")
         if identity["passed"]:
             parts = identity["raw"].split("|")
@@ -284,10 +284,10 @@ class XiaoESP32S3HealthCheck:
             )
         checks["identity"] = identity
         if progress:
-            progress("hello", "正在运行 Hello World 测试程序…")
+            progress("hello", "Running the Hello World test program…")
         checks["hello"] = self.command(port, "HEALTH_HELLO")
         if progress:
-            progress("complete", "基础体检完成，等待接口接线测试。")
+            progress("complete", "Basic health check complete. Waiting for interface wiring tests.")
         return {"port": port, "checks": checks, "steps": self.steps()}
 
     def run_interface_test(
@@ -310,7 +310,7 @@ class XiaoESP32S3HealthCheck:
             if first == second:
                 raise ValueError("GPIO loopback requires two different pins")
             command = f"HEALTH_GPIO {first} {second}"
-            response["instruction"] = f"断电后用杜邦线连接 {first} 与 {second}，再重新上电。"
+            response["instruction"] = f"Power off the board, connect {first} and {second} with a jumper wire, then power it on again."
             response["pins"] = [first, second]
         return {**response, "result": self.command(port, command)}
 

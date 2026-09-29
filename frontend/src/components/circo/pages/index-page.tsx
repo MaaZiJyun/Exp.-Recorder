@@ -19,12 +19,12 @@ const sections: Array<{
   {
     title: "Experiment Setup",
     description: "Prepare stimulation positions, plans, trials, and signal parameters.",
-    links: [["positions", "Positions"], ["plans", "Plans"], ["trials", "Trials"], ["signal-generation", "Signal Generation"]],
+    links: [["positions", "Positions"], ["experiments", "Experiments"], ["plans", "Plans"], ["trials", "Trials"]],
   },
   {
     title: "Operation",
     description: "Connect to an online controller or inspect application activity.",
-    links: [["live-control", "Live Control"], ["logs", "Logs"]],
+    links: [["signal-generation", "Signal Generation"], ["live-control", "Live Control"], ["logs", "Logs"]],
   },
 ];
 

@@ -20,6 +20,7 @@ import type {
 
 export type ManageTab =
   | "experiments"
+  | "plans"
   | "trials"
   | "subjects"
   | "positions"
@@ -515,8 +516,8 @@ export function useRecorder() {
     }
   };
 
-  const deleteExperiment = async () => {
-    const experiment = experiments.find(
+  const deleteExperiment = async (record?: Experiment) => {
+    const experiment = record ?? experiments.find(
       (item) => item.experiment_id === managedExperimentId,
     );
     if (
@@ -526,14 +527,13 @@ export function useRecorder() {
       return;
     setExperimentDeleting(true);
     try {
+      const deletingManagedExperiment =
+        managedExperimentId === experiment.experiment_id;
       await api(`/experiments/${experiment.experiment_id}`, {
         method: "DELETE",
       });
       const records = await loadExperiments();
-      const next =
-        records.find(
-          (item) => item.experiment_id !== experiment.experiment_id,
-        ) ?? null;
+      const next = records[0] ?? null;
       setRunExperimentId((current) =>
         current === String(experiment.experiment_id)
           ? next
@@ -541,8 +541,14 @@ export function useRecorder() {
             : ""
           : current,
       );
-      if (next) await selectManagedExperiment(next);
-      else newExperiment();
+      if (deletingManagedExperiment && next) {
+        await selectManagedExperiment(next);
+      } else if (deletingManagedExperiment) {
+        managedExperimentRef.current = null;
+        setManagedExperimentId(null);
+        setTrials([]);
+        setExperimentPlans([]);
+      }
       setNotice({
         kind: "success",
         text: `Experiment “${experiment.title}” was deleted.`,
@@ -1194,7 +1200,7 @@ export function useRecorder() {
           () => setSubjectPositionCombinationStatistics([]),
         );
     }
-    if (section === "experiments" && managedExperimentId)
+    if (section === "plans" && managedExperimentId)
       void loadExperimentPlans(managedExperimentId);
     if (section === "trials" && managedExperimentId)
       void loadTrials("", managedExperimentId);

@@ -1,14 +1,18 @@
 "use client";
 
 import type { RecorderContext } from "@/app/use-recorder";
-import { ExperimentIndex } from "@/components/circo/recorder/experiment-index";
+import { PageHeader } from "@/components/circo/page-elements";
+import { ExperimentPicker } from "@/components/circo/recorder/experiment-picker";
 import { Notice } from "@/components/circo/recorder/notice";
 import { TrialsPanel } from "@/components/circo/recorder/trials-panel";
+import { Card } from "@/components/circo/primitives";
 
 export function TrialsPage({ ctx }: { ctx: RecorderContext }) {
   const { notice, setNotice } = ctx;
-  return <>
+  return <div className="grid min-w-0 gap-6">
+    <PageHeader eyebrow="Filters" title="Trials" subtitle="Review, annotate, and export trials from a selected experiment." />
     <Notice notice={notice} onClose={() => setNotice(null)} />
-    <section className="mt-6 grid gap-5 xl:grid-cols-[minmax(280px,0.7fr)_minmax(0,1.6fr)]"><aside className="min-w-0"><ExperimentIndex ctx={ctx} /></aside><section className="min-w-0"><TrialsPanel ctx={ctx} /></section></section>
-  </>;
+    <Card><ExperimentPicker ctx={ctx} /></Card>
+    <TrialsPanel ctx={ctx} />
+  </div>;
 }

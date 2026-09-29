@@ -45,6 +45,8 @@ type DataTableProps<T> = {
   getRowId: (row: T) => Key;
   renderInfo: (row: T) => ReactNode;
   getInfoTitle?: (row: T) => ReactNode;
+  defaultInfo?: ReactNode;
+  defaultInfoTitle?: ReactNode;
   getSearchText?: (row: T) => string;
   searchPlaceholder?: string;
   emptyTitle?: string;
@@ -83,6 +85,8 @@ export function DataTable<T,>({
   getRowId,
   renderInfo,
   getInfoTitle,
+  defaultInfo,
+  defaultInfoTitle = "Overview",
   getSearchText,
   searchPlaceholder = "Search records...",
   emptyTitle = "No records",
@@ -215,32 +219,32 @@ export function DataTable<T,>({
 
       <div
         className={
-          selectedRow
+          selectedRow || defaultInfo
             ? "grid min-w-0 max-w-full items-start gap-4 lg:grid-cols-[minmax(220px,1fr)_minmax(0,3fr)]"
             : "min-w-0 max-w-full"
         }
       >
-        {selectedRow ? (
+        {selectedRow || defaultInfo ? (
           <aside className="min-w-0 max-w-full overflow-hidden rounded-2xl border border-zinc-200 bg-zinc-50/70 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
             <div className="mb-4 flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Info Card</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">{selectedRow ? "Info Card" : "Overview"}</p>
                 <h3 className="mt-1 truncate text-base font-semibold text-zinc-950 dark:text-zinc-50">
-                  {getInfoTitle?.(selectedRow) ?? `Record ${String(getRowId(selectedRow))}`}
+                  {selectedRow ? getInfoTitle?.(selectedRow) ?? `Record ${String(getRowId(selectedRow))}` : defaultInfoTitle}
                 </h3>
               </div>
-              <button
+              {selectedRow ? <button
                 type="button"
                 onClick={() => setSelectedId(null)}
                 className="rounded-lg px-2 py-1 text-xs text-zinc-500 hover:bg-zinc-200/70 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
               >
                 Close
-              </button>
+              </button> : null}
             </div>
 
-            <div className="text-sm text-zinc-700 dark:text-zinc-300">{renderInfo(selectedRow)}</div>
+            <div className="text-sm text-zinc-700 dark:text-zinc-300">{selectedRow ? renderInfo(selectedRow) : defaultInfo}</div>
 
-            <div className="mt-5 grid gap-2">
+            {selectedRow ? <div className="mt-5 grid gap-2">
               {rowActions(selectedRow).map((action) => (
                 <button
                   key={action.key}
@@ -252,7 +256,7 @@ export function DataTable<T,>({
                   {action.label}
                 </button>
               ))}
-            </div>
+            </div> : null}
           </aside>
         ) : null}
 

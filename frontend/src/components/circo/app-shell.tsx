@@ -21,6 +21,7 @@ export type PageId =
   | "hardware"
   | "software"
   | "positions"
+  | "experiments"
   | "plans"
   | "trials"
   | "signal-generation"
@@ -44,15 +45,16 @@ const navigationGroups = [
     icon: FunnelIcon,
     items: [
       ["positions", "Positions"],
+      ["experiments", "Experiments"],
       ["plans", "Plans"],
       ["trials", "Trials"],
-      ["signal-generation", "Signal Generation"],
     ],
   },
   {
     label: "Operation",
     icon: BeakerIcon,
     items: [
+      ["signal-generation", "Signal Generation"],
       ["live-control", "Live Control"],
       ["logs", "Logs"],
     ],

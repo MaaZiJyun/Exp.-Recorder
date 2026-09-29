@@ -337,7 +337,20 @@ class DatabaseManager:
                     SELECT COUNT(*) FROM trials t
                     WHERE t.stimulation_position_id = p.position_id
                        OR t.stimulation_position_2_id = p.position_id
-                ) AS trial_count
+                ) AS trial_count, (
+                    SELECT COUNT(*) FROM trials t
+                    WHERE (t.stimulation_position_id = p.position_id
+                       OR t.stimulation_position_2_id = p.position_id)
+                      AND t.status IN ('COMPLETED', 'FAILED', 'ABORTED')
+                ) AS reliability_trial_count, (
+                    SELECT ROUND(
+                        100.0 * SUM(CASE WHEN t.status = 'COMPLETED' THEN 1 ELSE 0 END)
+                        / NULLIF(COUNT(*), 0), 1
+                    ) FROM trials t
+                    WHERE (t.stimulation_position_id = p.position_id
+                       OR t.stimulation_position_2_id = p.position_id)
+                      AND t.status IN ('COMPLETED', 'FAILED', 'ABORTED')
+                ) AS reliability
                 FROM stimulation_positions p
                 LEFT JOIN stimulation_position_images i ON i.image_id = p.image_id
                 WHERE p.position_id = ?
@@ -354,7 +367,20 @@ class DatabaseManager:
                     SELECT COUNT(*) FROM trials t
                     WHERE t.stimulation_position_id = p.position_id
                        OR t.stimulation_position_2_id = p.position_id
-                ) AS trial_count
+                ) AS trial_count, (
+                    SELECT COUNT(*) FROM trials t
+                    WHERE (t.stimulation_position_id = p.position_id
+                       OR t.stimulation_position_2_id = p.position_id)
+                      AND t.status IN ('COMPLETED', 'FAILED', 'ABORTED')
+                ) AS reliability_trial_count, (
+                    SELECT ROUND(
+                        100.0 * SUM(CASE WHEN t.status = 'COMPLETED' THEN 1 ELSE 0 END)
+                        / NULLIF(COUNT(*), 0), 1
+                    ) FROM trials t
+                    WHERE (t.stimulation_position_id = p.position_id
+                       OR t.stimulation_position_2_id = p.position_id)
+                      AND t.status IN ('COMPLETED', 'FAILED', 'ABORTED')
+                ) AS reliability
                 FROM stimulation_positions p
                 LEFT JOIN stimulation_position_images i ON i.image_id = p.image_id
                 ORDER BY p.code COLLATE NOCASE, p.position_id"""

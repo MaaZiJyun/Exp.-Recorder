@@ -5,6 +5,7 @@ import { AppShell, type PageId } from "@/components/circo/app-shell";
 import { Badge } from "@/components/circo/primitives";
 import { appConfig } from "@/config/app-config";
 import { HardwarePage } from "@/components/circo/pages/hardware-page";
+import { ExperimentsPage } from "@/components/circo/pages/experiments-page";
 import { IndexPage } from "@/components/circo/pages/index-page";
 import { LiveControlPage } from "@/components/circo/pages/live-control-page";
 import { LogsPage } from "@/components/circo/pages/logs-page";
@@ -31,7 +32,8 @@ export default function Home() {
       species: "species",
       subjects: "subjects",
       positions: "positions",
-      plans: "experiments",
+      experiments: "experiments",
+      plans: "plans",
       trials: "trials",
     };
     const section = manageSections[page];
@@ -47,6 +49,7 @@ export default function Home() {
     hardware: <HardwarePage onOpenConsole={(board) => { setControlBoard(board); changePage("live-control"); }} />,
     software: <SoftwarePage />,
     positions: <PositionsPage ctx={ctx} />,
+    experiments: <ExperimentsPage ctx={ctx} />,
     plans: <PlansPage ctx={ctx} />,
     trials: <TrialsPage ctx={ctx} />,
     "signal-generation": <SignalGenerationPage ctx={ctx} />,

@@ -48,6 +48,8 @@ class TestExpRecorder(unittest.TestCase):
         position = self.db.get_stimulation_position(position_id)
         self.assertEqual(position["code"], "A1")
         self.assertEqual(position["trial_count"], 0)
+        self.assertEqual(position["reliability_trial_count"], 0)
+        self.assertIsNone(position["reliability"])
         self.assertEqual(position["mark"], {"x": 0.25, "y": 0.75})
         self.assertTrue(
             self.db.update_stimulation_position(
@@ -113,6 +115,8 @@ class TestExpRecorder(unittest.TestCase):
         self.assertEqual(trials[0]["experiment_id"], experiment_id)
         self.assertEqual(trials[0]["experiment_title"], "Startle response v2")
         self.assertEqual(self.db.get_stimulation_position(position_id)["trial_count"], 1)
+        self.assertEqual(self.db.get_stimulation_position(position_id)["reliability_trial_count"], 1)
+        self.assertEqual(self.db.get_stimulation_position(position_id)["reliability"], 100.0)
         self.assertEqual(self.db.get_stimulation_position(position_2_id)["trial_count"], 1)
         with self.assertRaises(sqlite3.IntegrityError):
             self.db.delete_stimulation_position(position_id)

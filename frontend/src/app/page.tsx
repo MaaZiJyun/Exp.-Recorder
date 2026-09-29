@@ -5,14 +5,16 @@ import { AppShell, type PageId } from "@/components/circo/app-shell";
 import { Badge } from "@/components/circo/primitives";
 import { appConfig } from "@/config/app-config";
 import { HardwarePage } from "@/components/circo/pages/hardware-page";
+import { IndexPage } from "@/components/circo/pages/index-page";
 import { LiveControlPage } from "@/components/circo/pages/live-control-page";
 import { LogsPage } from "@/components/circo/pages/logs-page";
 import { MaterialsToolsPage } from "@/components/circo/pages/materials-tools-page";
-import { ObjectsPage } from "@/components/circo/pages/objects-page";
 import { PlansPage } from "@/components/circo/pages/plans-page";
 import { PositionsPage } from "@/components/circo/pages/positions-page";
 import { SignalGenerationPage } from "@/components/circo/pages/signal-generation-page";
 import { SoftwarePage } from "@/components/circo/pages/software-page";
+import { SpeciesPage } from "@/components/circo/pages/species-page";
+import { SubjectsPage } from "@/components/circo/pages/subjects-page";
 import { TrialsPage } from "@/components/circo/pages/trials-page";
 import { useRecorder } from "./use-recorder";
 import type { Board } from "./types";
@@ -20,13 +22,14 @@ import type { Board } from "./types";
 export default function Home() {
   const ctx = useRecorder();
   const { devices, ready, changeSection, changeWorkspace } = ctx;
-  const [activePage, setActivePage] = useState<PageId>("signal-generation");
+  const [activePage, setActivePage] = useState<PageId>("index");
   const [controlBoard, setControlBoard] = useState<Board | null>(null);
 
   const changePage = (page: PageId) => {
     setActivePage(page);
     const manageSections: Partial<Record<PageId, string>> = {
-      objects: "subjects",
+      species: "species",
+      subjects: "subjects",
       positions: "positions",
       plans: "experiments",
       trials: "trials",
@@ -37,7 +40,9 @@ export default function Home() {
   };
 
   const content = {
-    objects: <ObjectsPage ctx={ctx} />,
+    index: <IndexPage onNavigate={changePage} />,
+    species: <SpeciesPage ctx={ctx} />,
+    subjects: <SubjectsPage ctx={ctx} />,
     "materials-tools": <MaterialsToolsPage />,
     hardware: <HardwarePage onOpenConsole={(board) => { setControlBoard(board); changePage("live-control"); }} />,
     software: <SoftwarePage />,

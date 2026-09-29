@@ -64,7 +64,6 @@ export function useRecorder() {
     feeding_cycle_h: "",
     rest_cycle_h: "",
   });
-  const [subjectQuery, setSubjectQuery] = useState("");
   const [editingSubject, setEditingSubject] = useState(false);
   const [subjectEditorId, setSubjectEditorId] = useState<string | null>(null);
   const [subjectSaving, setSubjectSaving] = useState(false);
@@ -1117,14 +1116,6 @@ export function useRecorder() {
           .includes(normalizedExperimentQuery),
       )
     : experiments;
-  const normalizedSubjectQuery = subjectQuery.trim().toLowerCase();
-  const visibleSubjects = normalizedSubjectQuery
-    ? subjects.filter((subject) =>
-        `${subject.subject_id} ${subject.notes ?? ""}`
-          .toLowerCase()
-          .includes(normalizedSubjectQuery),
-      )
-    : subjects;
   const normalizedPositionQuery = positionQuery.trim().toLowerCase();
   const visiblePositions = normalizedPositionQuery
     ? positions.filter((position) =>
@@ -1207,7 +1198,7 @@ export function useRecorder() {
       void loadExperimentPlans(managedExperimentId);
     if (section === "trials" && managedExperimentId)
       void loadTrials("", managedExperimentId);
-    setManageTab((section === "species" ? "subjects" : section) as ManageTab);
+    setManageTab(section as ManageTab);
   };
 
   const changeWorkspace = (workspace: "execute" | "manage") => {
@@ -1236,7 +1227,6 @@ export function useRecorder() {
     editingSpecies,
     speciesEditorId,
     speciesDraft,
-    subjectQuery,
     editingSubject,
     subjectEditorId,
     subjectSaving,
@@ -1287,7 +1277,6 @@ export function useRecorder() {
     setExperimentEditorId,
     setExperimentSaving,
     setExperimentDeleting,
-    setSubjectQuery,
     setEditingSubject,
     setSubjectEditorId,
     setSubjectDraft,
@@ -1369,7 +1358,6 @@ export function useRecorder() {
     running,
     managedExperiment,
     visibleExperiments,
-    visibleSubjects,
     visiblePositions,
     statisticSubjects,
     statisticPositionCombinations,

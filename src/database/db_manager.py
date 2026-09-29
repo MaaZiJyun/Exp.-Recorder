@@ -163,6 +163,15 @@ class DatabaseManager:
                         "UPDATE stimulation_positions SET image_id = ?, image = NULL WHERE position_id = ?",
                         (image_id, row["position_id"]),
                     )
+            existing_software_columns = {
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(software)").fetchall()
+            }
+            if "supported_device" not in existing_software_columns:
+                conn.execute(
+                    """ALTER TABLE software ADD COLUMN supported_device TEXT
+                       NOT NULL DEFAULT 'XIAO ESP32S3'"""
+                )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_trials_experiment ON trials(experiment_id)"
             )
@@ -178,7 +187,45 @@ class DatabaseManager:
                 FROM trials
                 WHERE response_latency_s IS NOT NULL OR response_action IS NOT NULL
             """)
+            self._seed_builtin_software(conn)
             conn.commit()
+
+    @staticmethod
+    def _seed_builtin_software(conn: sqlite3.Connection) -> None:
+        software_root = Path(__file__).resolve().parents[2] / "data" / "software"
+        builtins = (
+            (
+                "XIAO ESP32S3 Inventory Health Check",
+                "4.0.0",
+                "Inventory diagnostic firmware for USB identity, wireless capability, Hello World, GPIO, PWM, UART, SPI, and I2C checks.",
+                software_root / "xiao_esp32s3_healthcheck",
+                "XIAO ESP32S3",
+            ),
+            (
+                "XIAO ESP32S3 Recorder",
+                "1.0.0",
+                "USB MJPEG camera recorder firmware for the experiment-rig XIAO ESP32S3 Sense.",
+                software_root / "xiao_esp32s3_recorder",
+                "XIAO ESP32S3 Sense",
+            ),
+        )
+        for name, version, description, source_path, supported_device in builtins:
+            if not source_path.is_dir():
+                continue
+            conn.execute(
+                """INSERT INTO software
+                       (name, version, description, source_code_addr, supported_device)
+                   VALUES (?, ?, ?, ?, ?)
+                   ON CONFLICT(name, version) DO UPDATE SET
+                       description=excluded.description,
+                       source_code_addr=excluded.source_code_addr,
+                       supported_device=excluded.supported_device,
+                       updated_at=CURRENT_TIMESTAMP
+                   WHERE software.description IS NOT excluded.description
+                      OR software.source_code_addr IS NOT excluded.source_code_addr
+                      OR software.supported_device IS NOT excluded.supported_device""",
+                (name, version, description, str(source_path), supported_device),
+            )
 
     @classmethod
     def _migrate_board_macs_to_network_order(cls, conn: sqlite3.Connection) -> None:
@@ -837,6 +884,61 @@ class DatabaseManager:
             cursor = conn.execute(
                 "DELETE FROM peripherals WHERE peripheral_id = ?", (peripheral_id,)
             )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def list_software(self) -> List[Dict[str, Any]]:
+        with self.get_connection() as conn:
+            rows = conn.execute(
+                """SELECT id, name, version, description, source_code_addr, supported_device,
+                          created_at, updated_at
+                   FROM software
+                   ORDER BY name COLLATE NOCASE, version COLLATE NOCASE, id"""
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def get_software(self, software_id: int) -> Optional[Dict[str, Any]]:
+        with self.get_connection() as conn:
+            row = conn.execute(
+                """SELECT id, name, version, description, source_code_addr, supported_device,
+                          created_at, updated_at
+                   FROM software WHERE id=?""",
+                (software_id,),
+            ).fetchone()
+            return dict(row) if row else None
+
+    def create_software(self, data: Dict[str, Any]) -> int:
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """INSERT INTO software
+                       (name, version, description, source_code_addr, supported_device)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (
+                    data["name"], data["version"], data.get("description"),
+                    data["source_code_addr"], data["supported_device"],
+                ),
+            )
+            conn.commit()
+            return int(cursor.lastrowid)
+
+    def update_software(self, software_id: int, data: Dict[str, Any]) -> bool:
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """UPDATE software SET name=?, version=?, description=?,
+                          source_code_addr=?, supported_device=?,
+                          updated_at=CURRENT_TIMESTAMP
+                   WHERE id=?""",
+                (
+                    data["name"], data["version"], data.get("description"),
+                    data["source_code_addr"], data["supported_device"], software_id,
+                ),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def delete_software(self, software_id: int) -> bool:
+        with self.get_connection() as conn:
+            cursor = conn.execute("DELETE FROM software WHERE id=?", (software_id,))
             conn.commit()
             return cursor.rowcount > 0
 

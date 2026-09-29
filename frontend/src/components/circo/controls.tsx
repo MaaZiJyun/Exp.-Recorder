@@ -110,5 +110,5 @@ export function Field({
 }
 
 export function Card({ className = "", children }: { className?: string; children: React.ReactNode }) {
-  return <section className={`rounded-xl border border-zinc-200 bg-white p-5 ${className}`}>{children}</section>;
+  return <section className={`min-w-0 max-w-full rounded-xl border border-zinc-200 bg-white p-5 ${className}`}>{children}</section>;
 }

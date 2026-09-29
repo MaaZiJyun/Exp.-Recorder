@@ -6,5 +6,14 @@ venv/
 build/
 node_modules/
 .next/
-data/
+!data/
+data/*
+!data/software/
+data/software/*
+!data/software/xiao_esp32s3_healthcheck/
+!data/software/xiao_esp32s3_healthcheck/README.md
+!data/software/xiao_esp32s3_healthcheck/xiao_esp32s3_healthcheck.ino
+!data/software/xiao_esp32s3_recorder/
+!data/software/xiao_esp32s3_recorder/README.md
+!data/software/xiao_esp32s3_recorder/xiao_esp32s3_recorder.ino
 backup/

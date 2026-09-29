@@ -13,7 +13,7 @@ Web 界面会自动编译并烧录。也可以单独使用：
 ```bash
 arduino-cli compile --fqbn esp32:esp32:XIAO_ESP32S3 \
   --upload --port /dev/cu.usbmodemXXXX \
-  firmware/xiao_esp32s3_healthcheck
+  data/software/xiao_esp32s3_healthcheck
 ```
 
 串口参数为 `115200 8N1`。支持命令：

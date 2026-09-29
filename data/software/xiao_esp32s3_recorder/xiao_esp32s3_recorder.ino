@@ -1,5 +1,5 @@
 /*
- * XIAO ESP32S3 Sense USB MJPEG Streamer
+ * Cyborg Lab XIAO ESP32S3 Sense USB MJPEG Streamer
  *
  * The board does not need a microSD card. JPEG frames are sent over USB CDC;
  * the Exp.-Recorder Python service encodes them as a silent WebM file on the Mac.

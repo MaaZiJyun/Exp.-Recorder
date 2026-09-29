@@ -10,11 +10,15 @@ import io
 import math
 from pathlib import Path
 import re
+import shutil
 import sqlite3
+import subprocess
+import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
 import uuid
 from typing import Any, Literal, Optional
+from urllib.parse import unquote, urlparse
 
 from fastapi import FastAPI, HTTPException, Query, Response, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -29,6 +33,7 @@ from src.devices.sdg1022x import SDG1022XDriver
 from src.devices.xiao_camera import XiaoCameraDriver
 from src.devices.xiao_healthcheck import XiaoESP32S3HealthCheck
 from src.devices.lan_board_discovery import LanBoardDiscovery, normalize_mac
+from src.devices.software_flasher import SoftwareFlasher
 
 
 class TrialRequest(BaseModel):
@@ -149,6 +154,22 @@ class PeripheralRequest(BaseModel):
     interface_type: Literal["GPIO", "I2C", "SPI", "UART", "PWM"]
     voltage: float = Field(ge=0)
     status: Literal["online", "offline", "broken"] = "offline"
+
+
+class SoftwareRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    name: str = Field(min_length=1, max_length=200)
+    version: str = Field(min_length=1, max_length=100)
+    description: Optional[str] = Field(default=None, max_length=4000)
+    source_code_addr: str = Field(min_length=1, max_length=2000)
+    supported_device: str = Field(min_length=1, max_length=200)
+
+
+class SoftwareFlashRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    port: str = Field(min_length=1, max_length=500)
 
 
 class XiaoHealthStartRequest(BaseModel):
@@ -493,6 +514,8 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
     controller = ExperimentController(mock=mock, db_path=db_path)
     health_jobs: dict[str, dict[str, Any]] = {}
     health_jobs_lock = threading.Lock()
+    software_flash_jobs: dict[str, dict[str, Any]] = {}
+    software_flash_jobs_lock = threading.Lock()
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -639,6 +662,183 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
         if not controller.db.delete_peripheral(peripheral_id):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Peripheral not found")
         return {"deleted": True}
+
+    @app.get("/api/software")
+    def software_library() -> list[dict[str, Any]]:
+        return controller.db.list_software()
+
+    @app.get("/api/software/{software_id}")
+    def software_record(software_id: int) -> dict[str, Any]:
+        record = controller.db.get_software(software_id)
+        if record is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Software not found")
+        return record
+
+    @app.post("/api/software", status_code=status.HTTP_201_CREATED)
+    def create_software(request: SoftwareRequest) -> dict[str, Any]:
+        try:
+            software_id = controller.db.create_software(request.model_dump())
+        except sqlite3.IntegrityError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This software name and version already exist.",
+            ) from exc
+        record = controller.db.get_software(software_id)
+        assert record is not None
+        return record
+
+    @app.put("/api/software/{software_id}")
+    def update_software(software_id: int, request: SoftwareRequest) -> dict[str, Any]:
+        try:
+            updated = controller.db.update_software(software_id, request.model_dump())
+        except sqlite3.IntegrityError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This software name and version already exist.",
+            ) from exc
+        if not updated:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Software not found")
+        record = controller.db.get_software(software_id)
+        assert record is not None
+        return record
+
+    @app.delete("/api/software/{software_id}")
+    def delete_software(software_id: int) -> dict[str, bool]:
+        if not controller.db.delete_software(software_id):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Software not found")
+        return {"deleted": True}
+
+    @app.post("/api/software/{software_id}/open-source")
+    def open_software_source(software_id: int) -> dict[str, Any]:
+        record = controller.db.get_software(software_id)
+        if record is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Software not found")
+        address = record["source_code_addr"].strip()
+        parsed = urlparse(address)
+        if parsed.scheme in {"http", "https"}:
+            return {"opened": False, "url": address}
+        if parsed.scheme and parsed.scheme != "file":
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Source address must be a local path, file:// address, or HTTP(S) URL.",
+            )
+        raw_path = unquote(parsed.path) if parsed.scheme == "file" else address
+        path = Path(raw_path).expanduser().resolve()
+        if not path.exists():
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Source path does not exist: {path}",
+            )
+        if sys.platform == "darwin":
+            command = ["open", str(path)]
+        elif sys.platform.startswith("win"):
+            command = ["cmd", "/c", "start", "", str(path)]
+        else:
+            opener = shutil.which("xdg-open")
+            if not opener:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="No desktop source-file opener is available.",
+                )
+            command = [opener, str(path)]
+        try:
+            subprocess.Popen(
+                command,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        except OSError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Unable to open source path: {exc}",
+            ) from exc
+        return {"opened": True, "path": str(path)}
+
+    @app.get("/api/software-flash/ports")
+    def software_flash_ports() -> dict[str, Any]:
+        experiment_port = controller.camera.port if controller.camera.is_connected else None
+        flasher = SoftwareFlasher()
+        return {
+            "ports": [
+                {**item.to_dict(), "reserved_by_experiment": item.device == experiment_port}
+                for item in XiaoESP32S3HealthCheck.discover()
+            ],
+            "arduino_cli_available": flasher.arduino_cli is not None,
+            "fqbn": flasher.FQBN,
+        }
+
+    @app.get("/api/software-flash/jobs/{job_id}")
+    def software_flash_job(job_id: str) -> dict[str, Any]:
+        with software_flash_jobs_lock:
+            job = software_flash_jobs.get(job_id)
+            if job is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Flash job not found")
+            return {**job, "logs": list(job["logs"])}
+
+    @app.post("/api/software/{software_id}/flash", status_code=status.HTTP_202_ACCEPTED)
+    def flash_software(software_id: int, request: SoftwareFlashRequest) -> dict[str, Any]:
+        record = controller.db.get_software(software_id)
+        if record is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Software not found")
+        ensure_inventory_port(request.port)
+        flasher = SoftwareFlasher()
+        if not flasher.arduino_cli:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="arduino-cli was not found.",
+            )
+        try:
+            flasher.resolve_sketch(record["source_code_addr"])
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=str(exc),
+            ) from exc
+
+        job_id = uuid.uuid4().hex
+        now = datetime.now().isoformat(timespec="seconds")
+        job: dict[str, Any] = {
+            "job_id": job_id,
+            "software_id": software_id,
+            "software_name": record["name"],
+            "software_version": record["version"],
+            "port": request.port,
+            "status": "queued",
+            "stage": "queued",
+            "message": "The flash job was added to the background queue.",
+            "logs": [{"timestamp": now, "stage": "queued", "message": "The flash job was added to the background queue."}],
+            "result": None,
+        }
+        with software_flash_jobs_lock:
+            software_flash_jobs[job_id] = job
+
+        def report(stage: str, message: str) -> None:
+            entry = {
+                "timestamp": datetime.now().isoformat(timespec="seconds"),
+                "stage": stage,
+                "message": message,
+            }
+            with software_flash_jobs_lock:
+                current = software_flash_jobs[job_id]
+                current["stage"] = stage
+                current["message"] = message
+                current["logs"].append(entry)
+                current["logs"] = current["logs"][-300:]
+
+        def run_flash() -> None:
+            with software_flash_jobs_lock:
+                software_flash_jobs[job_id]["status"] = "running"
+            result = flasher.flash(record["source_code_addr"], request.port, progress=report)
+            report("complete" if result["passed"] else "failed", result["detail"])
+            with software_flash_jobs_lock:
+                current = software_flash_jobs[job_id]
+                current["status"] = "completed" if result["passed"] else "failed"
+                current["result"] = result
+
+        threading.Thread(target=run_flash, daemon=True).start()
+        with software_flash_jobs_lock:
+            return {**software_flash_jobs[job_id], "logs": list(software_flash_jobs[job_id]["logs"])}
 
     def ensure_inventory_port(port: str) -> None:
         experiment_port = controller.camera.port if controller.camera.is_connected else None

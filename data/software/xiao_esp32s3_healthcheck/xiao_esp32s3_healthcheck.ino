@@ -1,5 +1,5 @@
 /*
- * Exp. Recorder inventory health-check firmware for Seeed XIAO ESP32S3.
+ * Cyborg Lab inventory health-check firmware for Seeed XIAO ESP32S3.
  *
  * This sketch is intentionally separate from the experiment camera firmware.
  * Uploading it replaces whatever firmware is currently on the inventory board.

@@ -71,7 +71,8 @@ class XiaoESP32S3HealthCheck:
     ) -> None:
         self.sketch_dir = sketch_dir or (
             Path(__file__).resolve().parents[2]
-            / "firmware"
+            / "data"
+            / "software"
             / "xiao_esp32s3_healthcheck"
         )
         self.arduino_cli = shutil.which("arduino-cli") if arduino_cli is None else arduino_cli

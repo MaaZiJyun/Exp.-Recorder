@@ -52,6 +52,9 @@ type DataTableProps<T> = {
   onRead?: (row: T) => void | Promise<void>;
   onUpdate?: (row: T) => void | Promise<void>;
   onDelete?: (row: T) => void | Promise<void>;
+  isReadDisabled?: (row: T) => boolean;
+  isUpdateDisabled?: (row: T) => boolean;
+  isDeleteDisabled?: (row: T) => boolean;
   actions?: DataTableAction<T>[];
 };
 
@@ -87,6 +90,9 @@ export function DataTable<T,>({
   onRead,
   onUpdate,
   onDelete,
+  isReadDisabled,
+  isUpdateDisabled,
+  isDeleteDisabled,
   actions = [],
 }: DataTableProps<T>) {
   const [query, setQuery] = useState("");
@@ -166,9 +172,10 @@ export function DataTable<T,>({
         setSelectedId(getRowId(record));
         await onRead?.(record);
       },
+      disabled: isReadDisabled,
     },
     ...(onUpdate
-      ? [{ key: "update", label: "Update", onSelect: onUpdate } satisfies DataTableAction<T>]
+      ? [{ key: "update", label: "Update", onSelect: onUpdate, disabled: isUpdateDisabled } satisfies DataTableAction<T>]
       : []),
     ...(onDelete
       ? [
@@ -177,6 +184,7 @@ export function DataTable<T,>({
             label: "Delete",
             onSelect: onDelete,
             tone: "danger" as const,
+            disabled: isDeleteDisabled,
           } satisfies DataTableAction<T>,
         ]
       : []),
@@ -189,7 +197,7 @@ export function DataTable<T,>({
   };
 
   return (
-    <div className="space-y-4">
+    <div className="min-w-0 max-w-full space-y-4 overflow-hidden">
       <label className="relative block">
         <span className="sr-only">Search table</span>
         <MagnifyingGlassIcon
@@ -208,12 +216,12 @@ export function DataTable<T,>({
       <div
         className={
           selectedRow
-            ? "grid items-start gap-4 lg:grid-cols-[minmax(220px,1fr)_minmax(0,3fr)]"
-            : "block"
+            ? "grid min-w-0 max-w-full items-start gap-4 lg:grid-cols-[minmax(220px,1fr)_minmax(0,3fr)]"
+            : "min-w-0 max-w-full"
         }
       >
         {selectedRow ? (
-          <aside className="rounded-2xl border border-zinc-200 bg-zinc-50/70 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
+          <aside className="min-w-0 max-w-full overflow-hidden rounded-2xl border border-zinc-200 bg-zinc-50/70 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
             <div className="mb-4 flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Info Card</p>
@@ -248,9 +256,9 @@ export function DataTable<T,>({
           </aside>
         ) : null}
 
-        <div className="min-w-0 overflow-hidden rounded-2xl border border-zinc-200 dark:border-zinc-800">
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse text-left text-sm">
+        <div className="min-w-0 max-w-full overflow-hidden rounded-2xl border border-zinc-200 dark:border-zinc-800">
+          <div className="max-w-full overflow-x-auto overscroll-x-contain">
+            <table className="w-max min-w-full border-collapse text-left text-sm">
               <thead className="bg-zinc-50 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:bg-zinc-900/80 dark:text-zinc-400">
                 <tr>
                   {columns.map((column) => {

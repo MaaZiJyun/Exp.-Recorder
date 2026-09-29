@@ -64,6 +64,18 @@ CREATE TABLE IF NOT EXISTS peripherals (
 
 CREATE INDEX IF NOT EXISTS idx_peripherals_board ON peripherals(board_id);
 
+CREATE TABLE IF NOT EXISTS software (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    version TEXT NOT NULL,
+    description TEXT,
+    source_code_addr TEXT NOT NULL,
+    supported_device TEXT NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (name, version)
+);
+
 CREATE TABLE IF NOT EXISTS experiment (
     experiment_id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT NOT NULL,

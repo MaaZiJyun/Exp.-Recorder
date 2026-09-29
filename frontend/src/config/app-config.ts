@@ -10,12 +10,7 @@ export const appConfig = {
   },
   software: {
     pageTitle: "Software",
-    pageSubtitle: "View the software components used by the experiment system.",
-    components: [
-      { name: "Web Console", value: "Next.js" },
-      { name: "Experiment API", value: "FastAPI" },
-      { name: "Data Storage", value: "SQLite" },
-    ],
+    pageSubtitle: "Manage source projects, program versions, and firmware flashing.",
     runtime: ["SQLite", "SCPI", "USB Serial"],
   },
 } as const;

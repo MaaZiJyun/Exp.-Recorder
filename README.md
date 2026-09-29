@@ -46,9 +46,9 @@ Exp.-Recorder/
 │   ├── src/app/page.tsx              # 实验控制、历史记录与标注页面
 │   ├── src/app/globals.css           # 响应式界面样式
 │   └── next.config.ts                # 本地 Python API 反向代理
-├── firmware/
-│   └── xiao_esp32s3_recorder/
-│       └── xiao_esp32s3_recorder.ino   # XIAO ESP32S3 Sense USB MJPEG 固件
+├── data/software/
+│   ├── xiao_esp32s3_healthcheck/       # XIAO ESP32S3 库存体检固件
+│   └── xiao_esp32s3_recorder/          # XIAO ESP32S3 Sense USB MJPEG 固件
 ├── src/
 │   ├── config.py                      # 全局默认配置（串口号、默认刺激参数、基线时长等）
 │   ├── api/
@@ -92,7 +92,7 @@ cd ..
 ### 3.2 烧录 XIAO ESP32S3 Sense 固件
 1. 打开 Arduino IDE，安装 **ESP32 by Espressif Systems** 开发板支持包。
 2. 开发板选择：`XIAO_ESP32S3`，开启 `PSRAM: OPI PSRAM` 和 `USB CDC On Boot: Enabled`。
-3. 打开 `firmware/xiao_esp32s3_recorder/xiao_esp32s3_recorder.ino`。
+3. 打开 `data/software/xiao_esp32s3_recorder/xiao_esp32s3_recorder.ino`。
 4. 连接 XIAO 并点击上传；该固件不需要 microSD 卡。
 
 ---

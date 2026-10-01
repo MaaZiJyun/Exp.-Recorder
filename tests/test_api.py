@@ -137,7 +137,7 @@ class TestExperimentController(unittest.TestCase):
             "video_id": "EDIT01_T001_TEST",
             "experiment_timestamp": "2026-08-28 12:00:00",
             "video_file": "EDIT01_T001_TEST.webm",
-            "stimulation_position": "Head",
+            "stimulation_position": "DTP",
             "stimulation_voltage_v": 2.0,
             "stimulation_waveform": "SQUARE",
             "stimulation_high_level_v": 2.0,
@@ -151,13 +151,13 @@ class TestExperimentController(unittest.TestCase):
         })
 
         updated = self.controller.db.update_trial(trial_id, {
-            "stimulation_position": "Tail",
+            "stimulation_position": "DTP",
             "stimulation_frequency_hz": 200.0,
             "response_action": "2",
         })
         self.assertTrue(updated)
         row = self.controller.db.list_trials()[0]
-        self.assertEqual(row["stimulation_position"], "Tail")
+        self.assertEqual(row["stimulation_position"], "DTP")
         self.assertEqual(row["stimulation_frequency_hz"], 200.0)
         self.assertEqual(row["response_action"], "2")
 

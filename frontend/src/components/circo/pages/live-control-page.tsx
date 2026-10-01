@@ -232,6 +232,11 @@ export function LiveControlPage({ board }: { board: Board | null }) {
   const [cameraMessage, setCameraMessage] = useState<string | null>(null);
   const [cameraError, setCameraError] = useState(false);
   const [streamVersion, setStreamVersion] = useState(() => String(Date.now()));
+  const [frameRate, setFrameRate] = useState<{ url: string | null; value: number }>({ url: null, value: 0 });
+  const streamFrameCount = useRef(0);
+  const streamImage = useRef<HTMLImageElement>(null);
+  const frameUrl = useRef<string | null>(null);
+  const [nativeStreamUrl, setNativeStreamUrl] = useState<string | null>(null);
   const [photoCapturing, setPhotoCapturing] = useState(false);
   const [photoError, setPhotoError] = useState<string | null>(null);
   const [photo, setPhoto] = useState<{ url: string; resolution: string | null } | null>(null);
@@ -307,7 +312,7 @@ export function LiveControlPage({ board }: { board: Board | null }) {
           ) as Record<ActionId, ActionConfig>,
       );
       setConnectionState("connected");
-      setMessage(`Connected to ${resolved.model ?? "XIAO"} · ${resolved.ipAddress}`);
+      // setMessage(`Connected to ${resolved.model ?? "XIAO"} · ${resolved.ipAddress}`);
       setBoardPickerOpen(false);
       try {
         const cameraResponse = await fetch(
@@ -584,9 +589,90 @@ export function LiveControlPage({ board }: { board: Board | null }) {
     () => now?.toLocaleTimeString("en-US", { hour12: false }) ?? "--:--:--",
     [now],
   );
-  const streamUrl = endpoint
+  const boardStreamUrl = endpoint
     ? `http://${endpoint.ipAddress}:${endpoint.videoPort}/stream?v=${encodeURIComponent(streamVersion)}`
     : null;
+  const streamUrl = endpoint
+    ? `/api/live-stream?ip=${encodeURIComponent(endpoint.ipAddress)}&port=${endpoint.videoPort}&v=${encodeURIComponent(streamVersion)}`
+    : null;
+  const nativeStream = streamUrl !== null && nativeStreamUrl === streamUrl;
+  const streamFps = streamFailed || nativeStream || frameRate.url !== streamUrl ? null : frameRate.value;
+  useEffect(() => {
+    if (!streamUrl) return;
+    const timer = window.setInterval(() => {
+      setFrameRate({ url: streamUrl, value: streamFrameCount.current });
+      streamFrameCount.current = 0;
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [streamUrl]);
+  useEffect(() => {
+    streamFrameCount.current = 0;
+    if (!streamUrl) return;
+
+    const controller = new AbortController();
+    const readStream = async () => {
+      try {
+        const response = await fetch(streamUrl, { signal: controller.signal, cache: "no-store" });
+        if (!response.ok || !response.body) throw new Error("Video stream unavailable");
+        const reader = response.body.getReader();
+        let pending = new Uint8Array(0);
+        while (!controller.signal.aborted) {
+          const { done, value } = await reader.read();
+          if (done) throw new Error("Video stream ended");
+          const bytes = new Uint8Array(pending.length + value.length);
+          bytes.set(pending);
+          bytes.set(value, pending.length);
+          pending = bytes;
+
+          while (pending.length > 1) {
+            let start = -1;
+            for (let i = 0; i < pending.length - 1; i++) {
+              if (pending[i] === 0xff && pending[i + 1] === 0xd8) {
+                start = i;
+                break;
+              }
+            }
+            if (start < 0) {
+              pending = pending.slice(-1);
+              break;
+            }
+            let end = -1;
+            for (let i = start + 2; i < pending.length - 1; i++) {
+              if (pending[i] === 0xff && pending[i + 1] === 0xd9) {
+                end = i + 2;
+                break;
+              }
+            }
+            if (end < 0) {
+              pending = pending.slice(start);
+              if (pending.length > 5_000_000) throw new Error("Video frame too large");
+              break;
+            }
+            const image = streamImage.current;
+            if (image) {
+              const nextUrl = URL.createObjectURL(new Blob([pending.slice(start, end)], { type: "image/jpeg" }));
+              image.src = nextUrl;
+              if (frameUrl.current) URL.revokeObjectURL(frameUrl.current);
+              frameUrl.current = nextUrl;
+              streamFrameCount.current += 1;
+            }
+            pending = pending.slice(end);
+          }
+        }
+      } catch {
+        if (!controller.signal.aborted) {
+          streamFrameCount.current = 0;
+          setNativeStreamUrl(streamUrl);
+        }
+      }
+    };
+    void readStream();
+    return () => {
+      controller.abort();
+      if (frameUrl.current) URL.revokeObjectURL(frameUrl.current);
+      frameUrl.current = null;
+    };
+  }, [streamUrl]);
   const bounds = controllerConfig ?? {
     minDurationMs: 1,
     maxDurationMs: 4294967295,
@@ -614,7 +700,8 @@ export function LiveControlPage({ board }: { board: Board | null }) {
       <div className="absolute inset-0 bg-zinc-950">
         {streamUrl && !streamFailed ? (
           <img
-            src={streamUrl}
+            ref={streamImage}
+            src={nativeStream ? boardStreamUrl ?? undefined : undefined}
             alt="Live board camera feed"
             className="size-full object-contain"
             onError={() => setStreamFailed(true)}
@@ -643,6 +730,9 @@ export function LiveControlPage({ board }: { board: Board | null }) {
         <Battery50Icon className="size-6" />
         <span className="font-mono text-sm" title="The firmware does not currently provide a battery endpoint">
           --%
+        </span>
+        <span className="font-mono text-sm tabular-nums" title={nativeStream ? "The browser cannot read the video stream for frame counting" : "Received video frames per second"} aria-label={streamFps === null ? "Received frame rate unavailable" : `${streamFps} received frames per second`}>
+          Received FPS: {streamFps ?? "--"}
         </span>
       </div>
       <div
@@ -905,7 +995,7 @@ export function LiveControlPage({ board }: { board: Board | null }) {
                 </Select>
               </label>
               <CameraRange
-                label="FPS"
+                label="Target FPS"
                 value={cameraSettings.fps}
                 limits={[
                   cameraSettings.limits.fps[0],

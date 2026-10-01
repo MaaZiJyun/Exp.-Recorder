@@ -155,8 +155,6 @@ export type StimulationPosition = {
   species: string | null;
   created_at: string;
   trial_count: number;
-  reliability_trial_count: number;
-  reliability: number | null;
 };
 
 export type SubjectPositionCombinationStatistic = {

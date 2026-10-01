@@ -6,16 +6,12 @@ import type { StimulationPosition } from "@/app/types";
 import { DataTable, type DataTableColumn } from "@/components/circo/data-table";
 import { Badge, Button, Card, Dialog, EmptyState, Field, Input, Select, Textarea } from "@/components/circo/primitives";
 
-const reliabilityTone = (value: number | null): "neutral" | "success" | "warning" | "danger" => value === null ? "neutral" : value >= 80 ? "success" : value >= 50 ? "warning" : "danger";
-const reliabilityLabel = (position: StimulationPosition) => position.reliability === null ? "No data" : `${position.reliability.toFixed(1)}%`;
-
 const columns: DataTableColumn<StimulationPosition>[] = [
   { key: "id", header: "ID", cell: (row) => row.position_id, searchValue: (row) => row.position_id },
   { key: "code", header: "Code", cell: (row) => <Badge tone="info">{row.code}</Badge>, searchValue: (row) => row.code },
   { key: "description", header: "Description", cell: (row) => <span className="block max-w-md truncate">{row.description || "—"}</span>, searchValue: (row) => row.description },
   { key: "marked", header: "Marked", cell: (row) => <Badge tone={row.mark ? "success" : "warning"}>{row.mark ? "Yes" : "No"}</Badge>, sortValue: (row) => Boolean(row.mark), searchValue: (row) => row.mark ? "marked" : "unmarked" },
   { key: "trials", header: "Trials", cell: (row) => row.trial_count, sortValue: (row) => row.trial_count, searchValue: (row) => row.trial_count },
-  { key: "reliability", header: "Reliability", cell: (row) => <Badge tone={reliabilityTone(row.reliability)}>{reliabilityLabel(row)}</Badge>, sortValue: (row) => row.reliability, searchValue: (row) => reliabilityLabel(row) },
 ];
 
 function PositionOverview({ positions }: { positions: StimulationPosition[] }) {
@@ -47,7 +43,6 @@ function PositionInfo({ position }: { position: StimulationPosition }) {
       <div><dt className="text-xs text-zinc-500">Code</dt><dd className="mt-1"><Badge tone="info">{position.code}</Badge></dd></div>
       <div><dt className="text-xs text-zinc-500">Species</dt><dd className="mt-1">{position.species || "General"}</dd></div>
       <div><dt className="text-xs text-zinc-500">Description</dt><dd className="mt-1 whitespace-pre-wrap">{position.description || "No description"}</dd></div>
-      <div><dt className="text-xs text-zinc-500">Reliability</dt><dd className="mt-1"><Badge tone={reliabilityTone(position.reliability)}>{reliabilityLabel(position)}</Badge><span className="ml-2 text-xs text-zinc-500">{position.reliability_trial_count} evaluated trials</span></dd></div>
     </dl>
   </div>;
 }
@@ -80,8 +75,8 @@ export function PositionCardsPanel({ ctx, speciesCode }: { ctx: RecorderContext;
         getInfoTitle={(position) => position.code}
         defaultInfoTitle="All Stimulation Points"
         defaultInfo={<PositionOverview positions={filteredPositions} />}
-        getSearchText={(position) => `${position.position_id} ${position.code} ${position.description ?? ""} ${reliabilityLabel(position)}`}
-        searchPlaceholder="Search positions by code, description, or reliability..."
+        getSearchText={(position) => `${position.position_id} ${position.code} ${position.description ?? ""}`}
+        searchPlaceholder="Search positions by code or description..."
         emptyTitle="No positions"
         emptyDescription="Create and mark stimulation positions for this species."
         renderInfo={(position) => <PositionInfo position={position} />}

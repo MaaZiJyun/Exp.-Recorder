@@ -29,7 +29,7 @@ class StimulusConfig:
     duration_s: float = 0.5
     count: int = 1
     interval_s: float = 0.0
-    position: str = "Head"
+    position: str = "DTP"
     position_id: Optional[int] = None
     position_2_id: Optional[int] = None
 

@@ -220,7 +220,7 @@ export function DataTable<T,>({
       <div
         className={
           selectedRow || defaultInfo
-            ? "grid min-w-0 max-w-full items-start gap-4 lg:grid-cols-[minmax(220px,1fr)_minmax(0,3fr)]"
+            ? "grid min-w-0 max-w-full items-start gap-4 lg:grid-cols-[minmax(220px,1fr)_minmax(0,2fr)]"
             : "min-w-0 max-w-full"
         }
       >

@@ -39,7 +39,7 @@ class DiscoveredBoard:
 
 
 class LanBoardDiscovery:
-    """Use an explicit UDP handshake, then supplement it with the OS neighbor table."""
+    """Discover boards that respond to the current UDP handshake."""
 
     PORT = 37020
     REQUEST = b"EXP_RECORDER_DISCOVER_V1"
@@ -136,8 +136,7 @@ class LanBoardDiscovery:
         return list(found.values())
 
     def discover(self, registered_macs: Iterable[str], timeout: float = 1.2) -> list[DiscoveredBoard]:
-        normalized_registered = {mac for value in registered_macs if (mac := normalize_mac(value))}
-        found = {record.mac: record for record in self._neighbor_records(normalized_registered)}
-        for record in self._udp_discover(timeout):
-            found[record.mac] = record
-        return list(found.values())
+        # ARP/neighbor entries can remain cached after a board is disconnected,
+        # so only a response to this scan counts as currently online.
+        del registered_macs
+        return self._udp_discover(timeout)

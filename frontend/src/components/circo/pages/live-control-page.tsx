@@ -74,6 +74,11 @@ type CameraSettingsPatch = Partial<
     | "vflip"
   >
 >;
+type StreamStats = {
+  active: boolean;
+  stream_id: number;
+  frames_sent: number;
+};
 type DiscoveryResponse = {
   discovered: Array<{
     mac: string;
@@ -232,11 +237,10 @@ export function LiveControlPage({ board }: { board: Board | null }) {
   const [cameraMessage, setCameraMessage] = useState<string | null>(null);
   const [cameraError, setCameraError] = useState(false);
   const [streamVersion, setStreamVersion] = useState(() => String(Date.now()));
-  const [frameRate, setFrameRate] = useState<{ url: string | null; value: number }>({ url: null, value: 0 });
-  const streamFrameCount = useRef(0);
-  const streamImage = useRef<HTMLImageElement>(null);
-  const frameUrl = useRef<string | null>(null);
-  const [nativeStreamUrl, setNativeStreamUrl] = useState<string | null>(null);
+  const [frameRate, setFrameRate] = useState<{ url: string | null; value: number | null }>({ url: null, value: null });
+  const previousStreamStats = useRef<{ streamId: number; framesSent: number; timestamp: number } | null>(null);
+  const [streamOwnerUrl, setStreamOwnerUrl] = useState<string | null>(null);
+  const [streamLockUnavailable, setStreamLockUnavailable] = useState(false);
   const [photoCapturing, setPhotoCapturing] = useState(false);
   const [photoError, setPhotoError] = useState<string | null>(null);
   const [photo, setPhoto] = useState<{ url: string; resolution: string | null } | null>(null);
@@ -360,6 +364,7 @@ export function LiveControlPage({ board }: { board: Board | null }) {
     setMessage("Discovering controllable boards on the LAN…");
     setBoardPickerOpen(true);
     setConnectingMac(null);
+    setAvailableBoards([]);
     try {
       const response = await api<DiscoveryResponse>("/boards/discover", {
         method: "POST",
@@ -589,90 +594,98 @@ export function LiveControlPage({ board }: { board: Board | null }) {
     () => now?.toLocaleTimeString("en-US", { hour12: false }) ?? "--:--:--",
     [now],
   );
-  const boardStreamUrl = endpoint
+  const streamUrl = endpoint
     ? `http://${endpoint.ipAddress}:${endpoint.videoPort}/stream?v=${encodeURIComponent(streamVersion)}`
     : null;
-  const streamUrl = endpoint
-    ? `/api/live-stream?ip=${encodeURIComponent(endpoint.ipAddress)}&port=${endpoint.videoPort}&v=${encodeURIComponent(streamVersion)}`
+  const streamStatsUrl = endpoint
+    ? `http://${endpoint.ipAddress}:${endpoint.controlPort}/stream/stats`
     : null;
-  const nativeStream = streamUrl !== null && nativeStreamUrl === streamUrl;
-  const streamFps = streamFailed || nativeStream || frameRate.url !== streamUrl ? null : frameRate.value;
+  const ownsStream = streamUrl !== null && streamOwnerUrl === streamUrl;
+  const streamFps = streamFailed || !ownsStream || frameRate.url !== streamStatsUrl ? null : frameRate.value;
   useEffect(() => {
-    if (!streamUrl) return;
-    const timer = window.setInterval(() => {
-      setFrameRate({ url: streamUrl, value: streamFrameCount.current });
-      streamFrameCount.current = 0;
-    }, 1000);
-    return () => window.clearInterval(timer);
-  }, [streamUrl]);
-  useEffect(() => {
-    streamFrameCount.current = 0;
-    if (!streamUrl) return;
+    if (!streamUrl || !endpoint) return;
+    let active = true;
+    let releaseStream: (() => void) | null = null;
+    if (!navigator.locks) {
+      queueMicrotask(() => {
+        if (active) setStreamLockUnavailable(true);
+      });
+      return () => { active = false; };
+    }
 
-    const controller = new AbortController();
-    const readStream = async () => {
+    const lockKey = `exp-recorder-mjpeg:${endpoint.ipAddress}:${endpoint.videoPort}`;
+    const streamReleased = new Promise<void>((resolve) => {
+      releaseStream = resolve;
+    });
+    void navigator.locks.request(lockKey, { mode: "exclusive" }, async (lock) => {
+      if (!active || !lock) return;
+      setStreamLockUnavailable(false);
+      setStreamOwnerUrl(streamUrl);
+      await streamReleased;
+    }).catch(() => {
+      if (active) setStreamLockUnavailable(true);
+    });
+
+    return () => {
+      active = false;
+      releaseStream?.();
+    };
+  }, [endpoint, streamUrl]);
+  useEffect(() => {
+    if (!streamStatsUrl || !ownsStream) return;
+    let active = true;
+    let timer: number | undefined;
+    previousStreamStats.current = null;
+
+    const pollStats = async () => {
       try {
-        const response = await fetch(streamUrl, { signal: controller.signal, cache: "no-store" });
-        if (!response.ok || !response.body) throw new Error("Video stream unavailable");
-        const reader = response.body.getReader();
-        let pending = new Uint8Array(0);
-        while (!controller.signal.aborted) {
-          const { done, value } = await reader.read();
-          if (done) throw new Error("Video stream ended");
-          const bytes = new Uint8Array(pending.length + value.length);
-          bytes.set(pending);
-          bytes.set(value, pending.length);
-          pending = bytes;
+        const response = await fetch(streamStatsUrl, { cache: "no-store" });
+        if (!response.ok) throw new Error(`Stream stats request failed (${response.status})`);
+        const stats = (await response.json()) as StreamStats;
+        if (
+          typeof stats.active !== "boolean" ||
+          !Number.isSafeInteger(stats.stream_id) ||
+          !Number.isSafeInteger(stats.frames_sent) ||
+          stats.stream_id < 0 ||
+          stats.frames_sent < 0
+        ) throw new Error("Invalid stream stats response");
+        if (!active) return;
 
-          while (pending.length > 1) {
-            let start = -1;
-            for (let i = 0; i < pending.length - 1; i++) {
-              if (pending[i] === 0xff && pending[i + 1] === 0xd8) {
-                start = i;
-                break;
-              }
-            }
-            if (start < 0) {
-              pending = pending.slice(-1);
-              break;
-            }
-            let end = -1;
-            for (let i = start + 2; i < pending.length - 1; i++) {
-              if (pending[i] === 0xff && pending[i + 1] === 0xd9) {
-                end = i + 2;
-                break;
-              }
-            }
-            if (end < 0) {
-              pending = pending.slice(start);
-              if (pending.length > 5_000_000) throw new Error("Video frame too large");
-              break;
-            }
-            const image = streamImage.current;
-            if (image) {
-              const nextUrl = URL.createObjectURL(new Blob([pending.slice(start, end)], { type: "image/jpeg" }));
-              image.src = nextUrl;
-              if (frameUrl.current) URL.revokeObjectURL(frameUrl.current);
-              frameUrl.current = nextUrl;
-              streamFrameCount.current += 1;
-            }
-            pending = pending.slice(end);
+        const timestamp = performance.now();
+        const previous = previousStreamStats.current;
+        let fps: number | null = null;
+        if (!stats.active) {
+          fps = 0;
+        } else if (
+          previous &&
+          previous.streamId === stats.stream_id &&
+          stats.frames_sent >= previous.framesSent
+        ) {
+          const elapsedSeconds = (timestamp - previous.timestamp) / 1000;
+          if (elapsedSeconds > 0) {
+            fps = Math.round((stats.frames_sent - previous.framesSent) / elapsedSeconds);
           }
         }
+        previousStreamStats.current = {
+          streamId: stats.stream_id,
+          framesSent: stats.frames_sent,
+          timestamp,
+        };
+        setFrameRate({ url: streamStatsUrl, value: fps });
       } catch {
-        if (!controller.signal.aborted) {
-          streamFrameCount.current = 0;
-          setNativeStreamUrl(streamUrl);
-        }
+        if (active) setFrameRate({ url: streamStatsUrl, value: null });
+      } finally {
+        if (active) timer = window.setTimeout(() => void pollStats(), 1000);
       }
     };
-    void readStream();
+
+    void pollStats();
     return () => {
-      controller.abort();
-      if (frameUrl.current) URL.revokeObjectURL(frameUrl.current);
-      frameUrl.current = null;
+      active = false;
+      if (timer !== undefined) window.clearTimeout(timer);
+      previousStreamStats.current = null;
     };
-  }, [streamUrl]);
+  }, [ownsStream, streamStatsUrl]);
   const bounds = controllerConfig ?? {
     minDurationMs: 1,
     maxDurationMs: 4294967295,
@@ -698,10 +711,9 @@ export function LiveControlPage({ board }: { board: Board | null }) {
       aria-label="Live control workspace"
     >
       <div className="absolute inset-0 bg-zinc-950">
-        {streamUrl && !streamFailed ? (
+        {streamUrl && ownsStream && !streamFailed ? (
           <img
-            ref={streamImage}
-            src={nativeStream ? boardStreamUrl ?? undefined : undefined}
+            src={streamUrl}
             alt="Live board camera feed"
             className="size-full object-contain"
             onError={() => setStreamFailed(true)}
@@ -710,7 +722,11 @@ export function LiveControlPage({ board }: { board: Board | null }) {
           <div className="absolute inset-0 grid place-items-center bg-[radial-gradient(circle_at_50%_50%,rgba(255,255,255,0.08),transparent_28%),linear-gradient(145deg,#27272a_0%,#09090b_58%,#18181b_100%)] text-center text-zinc-500">
             <div>
               <p className="mt-3 text-sm tracking-[.2em]">
-                {connectionState === "discovering"
+                {streamUrl && streamLockUnavailable
+                  ? "EXCLUSIVE STREAM LOCK UNAVAILABLE"
+                  : streamUrl && !ownsStream
+                    ? "WAITING FOR VIDEO STREAM SLOT"
+                    : connectionState === "discovering"
                   ? "DISCOVERING BOARD"
                   : streamFailed
                     ? "VIDEO STREAM UNAVAILABLE"
@@ -731,7 +747,7 @@ export function LiveControlPage({ board }: { board: Board | null }) {
         <span className="font-mono text-sm" title="The firmware does not currently provide a battery endpoint">
           --%
         </span>
-        <span className="font-mono text-sm tabular-nums" title={nativeStream ? "The browser cannot read the video stream for frame counting" : "Received video frames per second"} aria-label={streamFps === null ? "Received frame rate unavailable" : `${streamFps} received frames per second`}>
+        <span className="font-mono text-sm tabular-nums" title="Estimated from browser image load events; some browsers do not report every MJPEG frame" aria-label={streamFps === null ? "Received frame rate unavailable" : `${streamFps} received frames per second`}>
           Received FPS: {streamFps ?? "--"}
         </span>
       </div>

@@ -19,7 +19,7 @@ const sections: Array<{
   {
     title: "Experiment Setup",
     description: "Prepare stimulation positions, plans, trials, and signal parameters.",
-    links: [["positions", "Positions"], ["experiments", "Experiments"], ["plans", "Plans"], ["trials", "Trials"]],
+    links: [["positions", "Positions"], ["channels", "Channels"], ["behaviors", "Behavior"], ["experiments", "Experiments"], ["plans", "Plans"], ["trials", "Trials"]],
   },
   {
     title: "Operation",

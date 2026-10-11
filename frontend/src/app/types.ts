@@ -155,6 +155,37 @@ export type StimulationPosition = {
   species: string | null;
   created_at: string;
   trial_count: number;
+  channel_count: number;
+};
+
+export type StimulationChannel = {
+  id: number;
+  species_id: number;
+  species_code: string;
+  species_scientific_name: string;
+  channel_name: string;
+  channel_pin_1: number;
+  channel_pin_2: number;
+  channel_pin_1_position_id: number;
+  channel_pin_1_position_code: string;
+  channel_pin_2_position_id: number;
+  channel_pin_2_position_code: string;
+  channel_freq_hz: number;
+  channel_stim_duration_ms: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type Behavior = {
+  id: number;
+  species_id: number;
+  species_code: string;
+  species_scientific_name: string;
+  name: string;
+  channel_id: number;
+  channel_name: string;
+  default_shortcut: string;
+  status: "off" | "on";
 };
 
 export type SubjectPositionCombinationStatistic = {

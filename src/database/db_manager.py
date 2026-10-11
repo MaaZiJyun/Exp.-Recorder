@@ -337,7 +337,11 @@ class DatabaseManager:
                     SELECT COUNT(*) FROM trials t
                     WHERE t.stimulation_position_id = p.position_id
                        OR t.stimulation_position_2_id = p.position_id
-                ) AS trial_count
+                ) AS trial_count, (
+                    SELECT COUNT(*) FROM stimulation_channel c
+                    WHERE c.channel_pin_1_position_id = p.position_id
+                       OR c.channel_pin_2_position_id = p.position_id
+                ) AS channel_count
                 FROM stimulation_positions p
                 LEFT JOIN stimulation_position_images i ON i.image_id = p.image_id
                 WHERE p.position_id = ?
@@ -354,7 +358,11 @@ class DatabaseManager:
                     SELECT COUNT(*) FROM trials t
                     WHERE t.stimulation_position_id = p.position_id
                        OR t.stimulation_position_2_id = p.position_id
-                ) AS trial_count
+                ) AS trial_count, (
+                    SELECT COUNT(*) FROM stimulation_channel c
+                    WHERE c.channel_pin_1_position_id = p.position_id
+                       OR c.channel_pin_2_position_id = p.position_id
+                ) AS channel_count
                 FROM stimulation_positions p
                 LEFT JOIN stimulation_position_images i ON i.image_id = p.image_id
                 ORDER BY p.code COLLATE NOCASE, p.position_id"""
@@ -445,6 +453,231 @@ class DatabaseManager:
             )
             if row:
                 self._remove_unused_position_image(conn, row["image_id"])
+            conn.commit()
+            return cursor.rowcount > 0
+
+    @staticmethod
+    def _validate_stimulation_channel_relations(
+        conn: sqlite3.Connection, data: Dict[str, Any]
+    ) -> None:
+        species = conn.execute(
+            "SELECT code FROM species WHERE species_id = ?",
+            (data["species_id"],),
+        ).fetchone()
+        if species is None:
+            raise ValueError("Species not found.")
+        if data["channel_pin_1"] == data["channel_pin_2"]:
+            raise ValueError("Pin 1 and Pin 2 must be different.")
+        if data["channel_pin_1_position_id"] == data["channel_pin_2_position_id"]:
+            raise ValueError("Pin 1 and Pin 2 must use different positions.")
+        positions = conn.execute(
+            """SELECT position_id, species FROM stimulation_positions
+            WHERE position_id IN (?, ?)""",
+            (
+                data["channel_pin_1_position_id"],
+                data["channel_pin_2_position_id"],
+            ),
+        ).fetchall()
+        if len(positions) != 2:
+            raise ValueError("Both stimulation positions must exist.")
+        if any(row["species"] != species["code"] for row in positions):
+            raise ValueError("Both stimulation positions must belong to the selected species.")
+
+    def get_stimulation_channel(self, channel_id: int) -> Optional[Dict[str, Any]]:
+        with self.get_connection() as conn:
+            row = conn.execute(
+                """SELECT c.*, s.code AS species_code,
+                    s.scientific_name AS species_scientific_name,
+                    p1.code AS channel_pin_1_position_code,
+                    p2.code AS channel_pin_2_position_code
+                FROM stimulation_channel c
+                JOIN species s ON s.species_id = c.species_id
+                JOIN stimulation_positions p1
+                  ON p1.position_id = c.channel_pin_1_position_id
+                JOIN stimulation_positions p2
+                  ON p2.position_id = c.channel_pin_2_position_id
+                WHERE c.id = ?""",
+                (channel_id,),
+            ).fetchone()
+            return dict(row) if row else None
+
+    def list_stimulation_channels(self) -> List[Dict[str, Any]]:
+        with self.get_connection() as conn:
+            rows = conn.execute(
+                """SELECT c.*, s.code AS species_code,
+                    s.scientific_name AS species_scientific_name,
+                    p1.code AS channel_pin_1_position_code,
+                    p2.code AS channel_pin_2_position_code
+                FROM stimulation_channel c
+                JOIN species s ON s.species_id = c.species_id
+                JOIN stimulation_positions p1
+                  ON p1.position_id = c.channel_pin_1_position_id
+                JOIN stimulation_positions p2
+                  ON p2.position_id = c.channel_pin_2_position_id
+                ORDER BY s.code COLLATE NOCASE, c.channel_name COLLATE NOCASE, c.id"""
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def create_stimulation_channel(self, data: Dict[str, Any]) -> int:
+        with self.get_connection() as conn:
+            self._validate_stimulation_channel_relations(conn, data)
+            cursor = conn.execute(
+                """INSERT INTO stimulation_channel
+                (species_id, channel_name, channel_pin_1, channel_pin_2,
+                 channel_pin_1_position_id, channel_pin_2_position_id,
+                 channel_freq_hz, channel_stim_duration_ms)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    data["species_id"],
+                    data["channel_name"],
+                    data["channel_pin_1"],
+                    data["channel_pin_2"],
+                    data["channel_pin_1_position_id"],
+                    data["channel_pin_2_position_id"],
+                    data["channel_freq_hz"],
+                    data["channel_stim_duration_ms"],
+                ),
+            )
+            conn.commit()
+            return cursor.lastrowid
+
+    def update_stimulation_channel(
+        self, channel_id: int, data: Dict[str, Any]
+    ) -> bool:
+        with self.get_connection() as conn:
+            if conn.execute(
+                "SELECT 1 FROM stimulation_channel WHERE id = ?", (channel_id,)
+            ).fetchone() is None:
+                return False
+            self._validate_stimulation_channel_relations(conn, data)
+            mismatched_behavior = conn.execute(
+                """SELECT 1 FROM behavior
+                WHERE channel_id = ? AND species_id != ? LIMIT 1""",
+                (channel_id, data["species_id"]),
+            ).fetchone()
+            if mismatched_behavior is not None:
+                raise ValueError(
+                    "The channel species cannot change while it is used by a behavior."
+                )
+            cursor = conn.execute(
+                """UPDATE stimulation_channel SET
+                    species_id = ?, channel_name = ?,
+                    channel_pin_1 = ?, channel_pin_2 = ?,
+                    channel_pin_1_position_id = ?, channel_pin_2_position_id = ?,
+                    channel_freq_hz = ?, channel_stim_duration_ms = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?""",
+                (
+                    data["species_id"],
+                    data["channel_name"],
+                    data["channel_pin_1"],
+                    data["channel_pin_2"],
+                    data["channel_pin_1_position_id"],
+                    data["channel_pin_2_position_id"],
+                    data["channel_freq_hz"],
+                    data["channel_stim_duration_ms"],
+                    channel_id,
+                ),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def delete_stimulation_channel(self, channel_id: int) -> bool:
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                "DELETE FROM stimulation_channel WHERE id = ?", (channel_id,)
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    @staticmethod
+    def _validate_behavior_relations(
+        conn: sqlite3.Connection, data: Dict[str, Any]
+    ) -> None:
+        species = conn.execute(
+            "SELECT 1 FROM species WHERE species_id = ?", (data["species_id"],)
+        ).fetchone()
+        if species is None:
+            raise ValueError("Species not found.")
+        channel = conn.execute(
+            "SELECT species_id FROM stimulation_channel WHERE id = ?",
+            (data["channel_id"],),
+        ).fetchone()
+        if channel is None:
+            raise ValueError("Stimulation channel not found.")
+        if channel["species_id"] != data["species_id"]:
+            raise ValueError("The stimulation channel must belong to the selected species.")
+
+    def get_behavior(self, behavior_id: int) -> Optional[Dict[str, Any]]:
+        with self.get_connection() as conn:
+            row = conn.execute(
+                """SELECT b.*, s.code AS species_code,
+                    s.scientific_name AS species_scientific_name,
+                    c.channel_name
+                FROM behavior b
+                JOIN species s ON s.species_id = b.species_id
+                JOIN stimulation_channel c ON c.id = b.channel_id
+                WHERE b.id = ?""",
+                (behavior_id,),
+            ).fetchone()
+            return dict(row) if row else None
+
+    def list_behaviors(self) -> List[Dict[str, Any]]:
+        with self.get_connection() as conn:
+            rows = conn.execute(
+                """SELECT b.*, s.code AS species_code,
+                    s.scientific_name AS species_scientific_name,
+                    c.channel_name
+                FROM behavior b
+                JOIN species s ON s.species_id = b.species_id
+                JOIN stimulation_channel c ON c.id = b.channel_id
+                ORDER BY s.code COLLATE NOCASE, b.name COLLATE NOCASE, b.id"""
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def create_behavior(self, data: Dict[str, Any]) -> int:
+        with self.get_connection() as conn:
+            self._validate_behavior_relations(conn, data)
+            cursor = conn.execute(
+                """INSERT INTO behavior
+                (species_id, name, channel_id, default_shortcut, status)
+                VALUES (?, ?, ?, ?, ?)""",
+                (
+                    data["species_id"],
+                    data["name"],
+                    data["channel_id"],
+                    data["default_shortcut"],
+                    data["status"],
+                ),
+            )
+            conn.commit()
+            return cursor.lastrowid
+
+    def update_behavior(self, behavior_id: int, data: Dict[str, Any]) -> bool:
+        with self.get_connection() as conn:
+            if conn.execute(
+                "SELECT 1 FROM behavior WHERE id = ?", (behavior_id,)
+            ).fetchone() is None:
+                return False
+            self._validate_behavior_relations(conn, data)
+            cursor = conn.execute(
+                """UPDATE behavior SET species_id = ?, name = ?, channel_id = ?,
+                    default_shortcut = ?, status = ? WHERE id = ?""",
+                (
+                    data["species_id"],
+                    data["name"],
+                    data["channel_id"],
+                    data["default_shortcut"],
+                    data["status"],
+                    behavior_id,
+                ),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def delete_behavior(self, behavior_id: int) -> bool:
+        with self.get_connection() as conn:
+            cursor = conn.execute("DELETE FROM behavior WHERE id = ?", (behavior_id,))
             conn.commit()
             return cursor.rowcount > 0
 

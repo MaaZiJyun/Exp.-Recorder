@@ -60,6 +60,8 @@ Hardware 页面还提供 XIAO ESP32S3 健康检查：
 | 页面 | 已实现功能 |
 | --- | --- |
 | **Positions** | 按物种管理刺激位置；复用物种参考图并在图上标记坐标；支持通用位置、搜索、预览和编辑。 |
+| **Channels** | 按物种注册双引脚刺激 Channel；为 D0–D8 引脚关联昆虫 Position，并管理频率和刺激时长。 |
+| **Behavior** | 按物种定义行为，关联已注册的 Channel、默认快捷键和 on/off 状态。 |
 | **Experiments** | 创建实验标题和说明，作为 Plans 与 Trials 的上级记录；已有 Trial 的实验不能直接删除。 |
 | **Plans** | 为选定实验批量选择对象，配置两处刺激位置、波形、电平、占空比、频率、持续时间、次数、间隔和计划 Trial 数；显示 Pending/In Progress/Completed 进度。 |
 | **Trials** | 按实验查看、搜索和编辑 Trial；播放视频和查看位置图；修改刺激参数、状态与行为标注；导出 CSV 或清理实验数据。 |
@@ -91,8 +93,10 @@ Hardware 页面还提供 XIAO ESP32S3 健康检查：
 
 - 扫描并选择当前局域网内已登记的控制板。
 - 显示 MJPEG 实时画面、接收帧率、十字准线和连接信息。
-- 通过界面按钮或键盘快捷键执行前、后、左、右控制。
-- 为每个方向配置有效状态、通道引脚、频率、持续时间和快捷键。
+- 在 Control Settings 选择 Species，并切换屏幕方向按钮或 Keyboard 控制方式。
+- 在 Shortcut Control 临时覆盖当前物种已启用 Behavior 的快捷键；刷新 Live Control 后恢复数据库中的默认值。
+- 通过界面按钮或键盘快捷键执行数据库中定义的 Behavior。
+- 从数据库加载当前物种的 Behavior 及其双引脚刺激 Channel；只有 `status=on` 的 Behavior 可以在 Live Control 中执行。
 - 设置摄像头分辨率、FPS、亮度、对比度、锐度、水平镜像和垂直翻转。
 - 以摄像头最大分辨率拍照、预览并下载 JPEG。
 - 同一控制板的视频流在浏览器标签页之间使用独占锁，避免重复占用流。
@@ -242,6 +246,8 @@ python3 main.py --cli --mock
 | `software` | 程序版本、源码地址和支持设备。 |
 | `experiment` | 实验标题和说明。 |
 | `stimulation_positions` | 物种刺激位置、参考图关联和归一化标记坐标。 |
+| `stimulation_channel` | 物种 Channel、D0–D8 双引脚、每个引脚对应的 Position、频率和刺激时长。 |
+| `behavior` | 物种可执行的行为、关联 Channel、默认快捷键和 on/off 状态。 |
 | `experiment_plans` | 对象、位置组合、刺激参数和目标 Trial 数。 |
 | `trials` | Trial 元数据、视频、刺激快照、运行状态和人工标注。 |
 | `tracking_points` / `responses` | 逐帧跟踪点和分析摘要的 API 数据结构。 |

@@ -23,7 +23,7 @@ from urllib.parse import unquote, urlparse
 from fastapi import FastAPI, HTTPException, Query, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src import config as cfg
 from src.core.models import Subject, StimulusConfig, TimingConfig, TrialConfig
@@ -216,6 +216,37 @@ class StimulationPositionRequest(BaseModel):
     image: Optional[str] = Field(default=None, max_length=3_000_000)
     mark: Optional[PositionMark] = None
     species: Optional[str] = Field(default=None, max_length=200)
+
+
+class StimulationChannelRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    species_id: int = Field(ge=1)
+    channel_name: str = Field(min_length=1, max_length=200)
+    channel_pin_1: int = Field(ge=0, le=8)
+    channel_pin_2: int = Field(ge=0, le=8)
+    channel_pin_1_position_id: int = Field(ge=1)
+    channel_pin_2_position_id: int = Field(ge=1)
+    channel_freq_hz: float = Field(gt=0)
+    channel_stim_duration_ms: int = Field(gt=0)
+
+    @model_validator(mode="after")
+    def validate_distinct_pairs(self) -> "StimulationChannelRequest":
+        if self.channel_pin_1 == self.channel_pin_2:
+            raise ValueError("Pin 1 and Pin 2 must be different.")
+        if self.channel_pin_1_position_id == self.channel_pin_2_position_id:
+            raise ValueError("Pin 1 and Pin 2 must use different positions.")
+        return self
+
+
+class BehaviorRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    species_id: int = Field(ge=1)
+    name: str = Field(min_length=1, max_length=200)
+    channel_id: int = Field(ge=1)
+    default_shortcut: str = Field(min_length=1, max_length=40)
+    status: Literal["off", "on"] = "on"
 
 
 _POSITION_IMAGE_PATTERN = re.compile(
@@ -1029,7 +1060,14 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
 
     @app.delete("/api/species/{species_id}")
     def delete_species(species_id: int) -> dict[str, bool]:
-        if not controller.db.delete_species(species_id):
+        try:
+            deleted = controller.db.delete_species(species_id)
+        except sqlite3.IntegrityError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Delete this species' stimulation channels first.",
+            ) from exc
+        if not deleted:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Species not found")
         return {"deleted": True}
 
@@ -1156,7 +1194,149 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Position not found")
         if record["trial_count"]:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This position is used by a trial and cannot be deleted.")
+        if record["channel_count"]:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This position is used by a stimulation channel and cannot be deleted.")
         controller.db.delete_stimulation_position(position_id)
+        return {"deleted": True}
+
+    @app.get("/api/stimulation-channels")
+    def stimulation_channels() -> list[dict[str, Any]]:
+        return controller.db.list_stimulation_channels()
+
+    @app.get("/api/stimulation-channels/{channel_id}")
+    def stimulation_channel(channel_id: int) -> dict[str, Any]:
+        record = controller.db.get_stimulation_channel(channel_id)
+        if record is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Stimulation channel not found",
+            )
+        return record
+
+    @app.post("/api/stimulation-channels", status_code=status.HTTP_201_CREATED)
+    def create_stimulation_channel(
+        request: StimulationChannelRequest,
+    ) -> dict[str, Any]:
+        try:
+            channel_id = controller.db.create_stimulation_channel(
+                request.model_dump()
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+            ) from exc
+        except sqlite3.IntegrityError as exc:
+            if "UNIQUE constraint failed" in str(exc):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="A channel with this name already exists for the species.",
+                ) from exc
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Invalid stimulation channel configuration.",
+            ) from exc
+        record = controller.db.get_stimulation_channel(channel_id)
+        assert record is not None
+        return record
+
+    @app.put("/api/stimulation-channels/{channel_id}")
+    def update_stimulation_channel(
+        channel_id: int, request: StimulationChannelRequest
+    ) -> dict[str, Any]:
+        try:
+            updated = controller.db.update_stimulation_channel(
+                channel_id, request.model_dump()
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+            ) from exc
+        except sqlite3.IntegrityError as exc:
+            if "UNIQUE constraint failed" in str(exc):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="A channel with this name already exists for the species.",
+                ) from exc
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Invalid stimulation channel configuration.",
+            ) from exc
+        if not updated:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Stimulation channel not found",
+            )
+        record = controller.db.get_stimulation_channel(channel_id)
+        assert record is not None
+        return record
+
+    @app.delete("/api/stimulation-channels/{channel_id}")
+    def delete_stimulation_channel(channel_id: int) -> dict[str, bool]:
+        try:
+            deleted = controller.db.delete_stimulation_channel(channel_id)
+        except sqlite3.IntegrityError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This channel is used by a behavior and cannot be deleted.",
+            ) from exc
+        if not deleted:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Stimulation channel not found",
+            )
+        return {"deleted": True}
+
+    @app.get("/api/behaviors")
+    def behaviors() -> list[dict[str, Any]]:
+        return controller.db.list_behaviors()
+
+    @app.get("/api/behaviors/{behavior_id}")
+    def behavior(behavior_id: int) -> dict[str, Any]:
+        record = controller.db.get_behavior(behavior_id)
+        if record is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Behavior not found")
+        return record
+
+    @app.post("/api/behaviors", status_code=status.HTTP_201_CREATED)
+    def create_behavior(request: BehaviorRequest) -> dict[str, Any]:
+        try:
+            behavior_id = controller.db.create_behavior(request.model_dump())
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        except sqlite3.IntegrityError as exc:
+            if "UNIQUE constraint failed" in str(exc):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="A behavior with this name already exists for the species.",
+                ) from exc
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid behavior configuration.") from exc
+        record = controller.db.get_behavior(behavior_id)
+        assert record is not None
+        return record
+
+    @app.put("/api/behaviors/{behavior_id}")
+    def update_behavior(behavior_id: int, request: BehaviorRequest) -> dict[str, Any]:
+        try:
+            updated = controller.db.update_behavior(behavior_id, request.model_dump())
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        except sqlite3.IntegrityError as exc:
+            if "UNIQUE constraint failed" in str(exc):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="A behavior with this name already exists for the species.",
+                ) from exc
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid behavior configuration.") from exc
+        if not updated:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Behavior not found")
+        record = controller.db.get_behavior(behavior_id)
+        assert record is not None
+        return record
+
+    @app.delete("/api/behaviors/{behavior_id}")
+    def delete_behavior(behavior_id: int) -> dict[str, bool]:
+        if not controller.db.delete_behavior(behavior_id):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Behavior not found")
         return {"deleted": True}
 
     @app.get("/api/experiments")

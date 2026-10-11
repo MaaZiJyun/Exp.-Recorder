@@ -21,6 +21,8 @@ export type PageId =
   | "hardware"
   | "software"
   | "positions"
+  | "channels"
+  | "behaviors"
   | "experiments"
   | "plans"
   | "trials"
@@ -45,6 +47,8 @@ const navigationGroups = [
     icon: FunnelIcon,
     items: [
       ["positions", "Positions"],
+      ["channels", "Channels"],
+      ["behaviors", "Behavior"],
       ["experiments", "Experiments"],
       ["plans", "Plans"],
       ["trials", "Trials"],

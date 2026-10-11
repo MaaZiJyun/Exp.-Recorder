@@ -110,6 +110,46 @@ CREATE TABLE IF NOT EXISTS stimulation_position_species (
     FOREIGN KEY (species_id) REFERENCES species(species_id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS stimulation_channel (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    species_id INTEGER NOT NULL,
+    channel_name TEXT NOT NULL,
+    channel_pin_1 INTEGER NOT NULL CHECK (channel_pin_1 BETWEEN 0 AND 8),
+    channel_pin_2 INTEGER NOT NULL CHECK (channel_pin_2 BETWEEN 0 AND 8),
+    channel_pin_1_position_id INTEGER NOT NULL,
+    channel_pin_2_position_id INTEGER NOT NULL,
+    channel_freq_hz REAL NOT NULL CHECK (channel_freq_hz > 0),
+    channel_stim_duration_ms INTEGER NOT NULL CHECK (channel_stim_duration_ms > 0),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CHECK (channel_pin_1 != channel_pin_2),
+    CHECK (channel_pin_1_position_id != channel_pin_2_position_id),
+    UNIQUE (species_id, channel_name),
+    FOREIGN KEY (species_id) REFERENCES species(species_id) ON DELETE RESTRICT,
+    FOREIGN KEY (channel_pin_1_position_id) REFERENCES stimulation_positions(position_id) ON DELETE RESTRICT,
+    FOREIGN KEY (channel_pin_2_position_id) REFERENCES stimulation_positions(position_id) ON DELETE RESTRICT
+);
+
+CREATE INDEX IF NOT EXISTS idx_stimulation_channel_species
+    ON stimulation_channel(species_id);
+CREATE INDEX IF NOT EXISTS idx_stimulation_channel_positions
+    ON stimulation_channel(channel_pin_1_position_id, channel_pin_2_position_id);
+
+CREATE TABLE IF NOT EXISTS behavior (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    species_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    channel_id INTEGER NOT NULL,
+    default_shortcut TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'on' CHECK (status IN ('off', 'on')),
+    UNIQUE (species_id, name),
+    FOREIGN KEY (species_id) REFERENCES species(species_id) ON DELETE RESTRICT,
+    FOREIGN KEY (channel_id) REFERENCES stimulation_channel(id) ON DELETE RESTRICT
+);
+
+CREATE INDEX IF NOT EXISTS idx_behavior_species ON behavior(species_id);
+CREATE INDEX IF NOT EXISTS idx_behavior_channel ON behavior(channel_id);
+
 CREATE TABLE IF NOT EXISTS experiment_plans (
     plan_id INTEGER PRIMARY KEY AUTOINCREMENT,
     experiment_id INTEGER NOT NULL,

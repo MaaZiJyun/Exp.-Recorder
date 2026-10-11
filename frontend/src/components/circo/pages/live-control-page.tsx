@@ -3,29 +3,19 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ArrowDownIcon,
-  ArrowLeftIcon,
   ArrowPathIcon,
-  ArrowRightIcon,
-  ArrowUpIcon,
   Battery50Icon,
   CameraIcon,
   ChevronDownIcon,
   Cog6ToothIcon,
   XMarkIcon,
 } from "@heroicons/react/24/outline";
-import type { Board } from "@/app/types";
+import type { Behavior, Board, SpeciesRecord, StimulationChannel } from "@/app/types";
 import { api } from "@/app/lib";
-import { Input, Select } from "@/components/circo/primitives";
+import { Select } from "@/components/circo/primitives";
 
-type ActionId = "forward" | "back" | "left" | "right";
-type SettingsSectionId = "connection" | "camera" | "channels" | "actions";
-type ActionConfig = {
-  valid: boolean;
-  frequencyHz: string;
-  durationMs: string;
-  key: string;
-};
+type SettingsSectionId = "connection" | "control" | "camera" | "shortcuts";
+type ControlMethod = "buttons" | "keyboard";
 type Endpoint = {
   ipAddress: string;
   controlPort: number;
@@ -92,47 +82,23 @@ type DiscoveryResponse = {
 };
 
 const actionMeta: Record<
-  ActionId,
-  { label: string; icon: typeof ArrowUpIcon; position: string; pair: string }
+  string,
+  { label: string }
 > = {
   forward: {
     label: "Forward",
-    icon: ArrowUpIcon,
-    position: "col-start-2 row-start-1",
-    pair: "Chnl1 ↔ Chnl4",
   },
   back: {
     label: "Back",
-    icon: ArrowDownIcon,
-    position: "col-start-2 row-start-3",
-    pair: "Chnl1 ↔ Chnl4",
   },
   left: {
     label: "Left",
-    icon: ArrowLeftIcon,
-    position: "col-start-1 row-start-2",
-    pair: "Chnl1 ↔ Chnl3",
   },
   right: {
     label: "Right",
-    icon: ArrowRightIcon,
-    position: "col-start-3 row-start-2",
-    pair: "Chnl1 ↔ Chnl2",
   },
 };
-const defaultActions: Record<ActionId, ActionConfig> = {
-  forward: { valid: true, frequencyHz: "50", durationMs: "500", key: "W" },
-  back: { valid: false, frequencyHz: "50", durationMs: "500", key: "S" },
-  left: { valid: true, frequencyHz: "50", durationMs: "500", key: "A" },
-  right: { valid: true, frequencyHz: "50", durationMs: "500", key: "D" },
-};
-const channelLabels = [
-  "Chnl1 · Common",
-  "Chnl2 · Right",
-  "Chnl3 · Left",
-  "Chnl4 · Forward / Back",
-];
-const pinOptions = Array.from({ length: 11 }, (_, index) => index);
+const pinOptions = Array.from({ length: 9 }, (_, index) => index);
 const shortcutKeys = [
   "W",
   "A",
@@ -151,6 +117,25 @@ function normalizedMac(value: string) {
 
 function displayMac(value: string) {
   return normalizedMac(value).match(/.{1,2}/g)?.join(":") ?? value;
+}
+
+function commandPinsForBehavior(name: string, channel: StimulationChannel) {
+  if (channel.channel_pin_1 === channel.channel_pin_2) return null;
+  const normalizedName = name.trim().toLowerCase();
+  const secondaryIndex = normalizedName === "right" ? 1 : normalizedName === "left" ? 2 : 3;
+  const fillers = pinOptions.filter(
+    (pin) => pin !== channel.channel_pin_1 && pin !== channel.channel_pin_2,
+  );
+  const pins = [channel.channel_pin_1, ...fillers.slice(0, 3)];
+  pins[secondaryIndex] = channel.channel_pin_2;
+  return pins;
+}
+
+function behaviorMeta(name: string) {
+  const normalizedName = name.trim().toLowerCase();
+  return actionMeta[normalizedName] ?? {
+    label: name,
+  };
 }
 
 async function imageBlobResolution(blob: Blob): Promise<string | null> {
@@ -224,10 +209,13 @@ export function LiveControlPage({ board }: { board: Board | null }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [expandedSettingsSection, setExpandedSettingsSection] =
     useState<SettingsSectionId | null>(null);
-  const [activeAction, setActiveAction] = useState<ActionId | null>(null);
-  const [actions, setActions] =
-    useState<Record<ActionId, ActionConfig>>(defaultActions);
-  const [channels, setChannels] = useState([7, 8, 9, 10]);
+  const [activeBehaviorId, setActiveBehaviorId] = useState<number | null>(null);
+  const [behaviors, setBehaviors] = useState<Behavior[]>([]);
+  const [shortcutOverrides, setShortcutOverrides] = useState<Record<number, string>>({});
+  const [channels, setChannels] = useState<StimulationChannel[]>([]);
+  const [speciesRecords, setSpeciesRecords] = useState<SpeciesRecord[]>([]);
+  const [selectedSpeciesId, setSelectedSpeciesId] = useState<number | null>(null);
+  const [controlMethod, setControlMethod] = useState<ControlMethod>("buttons");
   const [endpoint, setEndpoint] = useState<Endpoint | null>(null);
   const [availableBoards, setAvailableBoards] = useState<Endpoint[]>([]);
   const [boardPickerOpen, setBoardPickerOpen] = useState(board === null);
@@ -255,6 +243,23 @@ export function LiveControlPage({ board }: { board: Board | null }) {
   const [streamFailed, setStreamFailed] = useState(false);
   const connectionAttempt = useRef(0);
   const requestedBoard = useRef<string | null | undefined>(undefined);
+  const controlSpeciesId =
+    selectedSpeciesId !== null &&
+    speciesRecords.some((species) => species.species_id === selectedSpeciesId)
+      ? selectedSpeciesId
+      : speciesRecords[0]?.species_id ?? null;
+  const controlChannels = channels.filter(
+    (channel) => channel.species_id === controlSpeciesId,
+  );
+  const enabledBehaviors = behaviors.filter(
+    (behavior) =>
+      behavior.species_id === controlSpeciesId && behavior.status === "on",
+  );
+  const shortcutForBehavior = useCallback(
+    (behavior: Behavior) =>
+      shortcutOverrides[behavior.id] ?? behavior.default_shortcut,
+    [shortcutOverrides],
+  );
 
   useEffect(() => {
     const initial = window.setTimeout(() => setNow(new Date()), 0);
@@ -262,6 +267,32 @@ export function LiveControlPage({ board }: { board: Board | null }) {
     return () => {
       window.clearTimeout(initial);
       window.clearInterval(timer);
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    void Promise.all([
+      api<StimulationChannel[]>("/stimulation-channels"),
+      api<SpeciesRecord[]>("/species"),
+      api<Behavior[]>("/behaviors"),
+    ])
+      .then(([channelRecords, species, behaviorRecords]) => {
+        if (active) {
+          setChannels(channelRecords);
+          setSpeciesRecords(species);
+          setBehaviors(behaviorRecords);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setChannels([]);
+          setSpeciesRecords([]);
+          setBehaviors([]);
+        }
+      });
+    return () => {
+      active = false;
     };
   }, []);
 
@@ -274,7 +305,7 @@ export function LiveControlPage({ board }: { board: Board | null }) {
     setConnectingMac(target.mac);
     setConnectionState("discovering");
     setMessage(`Connecting to ${target.model ?? "XIAO"} · ${target.ipAddress}…`);
-    setActiveAction(null);
+    setActiveBehaviorId(null);
     if (endpoint) {
       void fetch(
         `http://${endpoint.ipAddress}:${endpoint.controlPort}/command?name=stop`,
@@ -305,20 +336,6 @@ export function LiveControlPage({ board }: { board: Board | null }) {
       };
       setEndpoint(resolved);
       setControllerConfig(config);
-      if (config.defaultPins.length === 4) setChannels(config.defaultPins);
-      setActions(
-        (current) =>
-          Object.fromEntries(
-            (Object.keys(current) as ActionId[]).map((id) => [
-              id,
-              {
-                ...current[id],
-                frequencyHz: String(config.frequency),
-                durationMs: String(config.durationMs),
-              },
-            ]),
-          ) as Record<ActionId, ActionConfig>,
-      );
       setConnectionState("connected");
       // setMessage(`Connected to ${resolved.model ?? "XIAO"} · ${resolved.ipAddress}`);
       setBoardPickerOpen(false);
@@ -357,7 +374,7 @@ export function LiveControlPage({ board }: { board: Board | null }) {
 
   const discover = useCallback(async (autoConnectMac?: string | null) => {
     const attempt = ++connectionAttempt.current;
-    setActiveAction(null);
+    setActiveBehaviorId(null);
     if (endpoint) {
       void fetch(
         `http://${endpoint.ipAddress}:${endpoint.controlPort}/command?name=stop`,
@@ -415,7 +432,7 @@ export function LiveControlPage({ board }: { board: Board | null }) {
 
   const sendStop = useCallback(
     (keepalive = false) => {
-      setActiveAction(null);
+      setActiveBehaviorId(null);
       if (endpoint)
         void fetch(
           `http://${endpoint.ipAddress}:${endpoint.controlPort}/command?name=stop`,
@@ -425,24 +442,48 @@ export function LiveControlPage({ board }: { board: Board | null }) {
     [endpoint],
   );
 
-  const startAction = useCallback(
-    async (id: ActionId) => {
-      const config = actions[id];
-      if (!endpoint || !config.valid || boardPickerOpen) return;
-      if (new Set(channels).size !== 4) {
-        setMessage("The four control channels must be unique. Correct them in Settings first.");
+  const startBehavior = useCallback(
+    async (behavior: Behavior) => {
+      if (!endpoint || behavior.status !== "on" || behavior.species_id !== controlSpeciesId || boardPickerOpen) return;
+      const channel = channels.find(
+        (item) =>
+          item.id === behavior.channel_id && item.species_id === controlSpeciesId,
+      );
+      const commandPins = channel ? commandPinsForBehavior(behavior.name, channel) : null;
+      const frequency = Number(channel?.channel_freq_hz);
+      const duration = Number(channel?.channel_stim_duration_ms);
+      if (
+        !channel ||
+        !commandPins ||
+        !channel.channel_name.trim() ||
+        !Number.isFinite(frequency) ||
+        frequency < (controllerConfig?.minFrequency ?? 1) ||
+        frequency > (controllerConfig?.maxFrequency ?? 500) ||
+        !Number.isFinite(duration) ||
+        duration < (controllerConfig?.minDurationMs ?? 1) ||
+        duration > (controllerConfig?.maxDurationMs ?? 4294967295)
+      ) {
+        setMessage("Select a valid channel for this behavior and check its pins, frequency, and duration.");
         return;
       }
       const query = new URLSearchParams({
-        name: id,
-        chnl1: String(channels[0]),
-        chnl2: String(channels[1]),
-        chnl3: String(channels[2]),
-        chnl4: String(channels[3]),
-        durationMs: config.durationMs,
-        frequency: config.frequencyHz,
+        name: behavior.name,
+        behavior_id: String(behavior.id),
+        channel_id: String(channel.id),
+        species_id: String(channel.species_id),
+        channel_name: channel.channel_name,
+        channel_pin_1: String(channel.channel_pin_1),
+        channel_pin_2: String(channel.channel_pin_2),
+        channel_freq_hz: String(channel.channel_freq_hz),
+        channel_stim_duration_ms: String(channel.channel_stim_duration_ms),
+        chnl1: String(commandPins[0]),
+        chnl2: String(commandPins[1]),
+        chnl3: String(commandPins[2]),
+        chnl4: String(commandPins[3]),
+        durationMs: String(channel.channel_stim_duration_ms),
+        frequency: String(channel.channel_freq_hz),
       });
-      setActiveAction(id);
+      setActiveBehaviorId(behavior.id);
       try {
         const response = await fetch(
           `http://${endpoint.ipAddress}:${endpoint.controlPort}/command?${query}`,
@@ -450,14 +491,14 @@ export function LiveControlPage({ board }: { board: Board | null }) {
         );
         if (!response.ok)
           throw new Error(
-            (await response.text()) || `Action request failed (${response.status})`,
+            (await response.text()) || `Behavior request failed (${response.status})`,
           );
       } catch (error) {
-        setActiveAction(null);
-        setMessage(error instanceof Error ? error.message : "Failed to send action");
+        setActiveBehaviorId(null);
+        setMessage(error instanceof Error ? error.message : "Failed to send behavior");
       }
     },
-    [actions, boardPickerOpen, channels, endpoint],
+    [boardPickerOpen, channels, controllerConfig, controlSpeciesId, endpoint],
   );
 
   const saveCameraSettings = useCallback(
@@ -533,28 +574,27 @@ export function LiveControlPage({ board }: { board: Board | null }) {
   }, [endpoint, photoCapturing]);
 
   useEffect(() => {
+    if (controlMethod !== "keyboard") return;
     const editable = (target: EventTarget | null) =>
       target instanceof HTMLInputElement ||
       target instanceof HTMLSelectElement ||
       target instanceof HTMLTextAreaElement;
-    const findAction = (key: string) =>
-      (Object.keys(actions) as ActionId[]).find(
-        (id) =>
-          actions[id].valid &&
-          actions[id].key.toLowerCase() === key.toLowerCase(),
+    const findBehavior = (key: string) =>
+      enabledBehaviors.find(
+        (behavior) => shortcutForBehavior(behavior).toLowerCase() === key.toLowerCase(),
       );
     const onKeyDown = (event: KeyboardEvent) => {
       if (editable(event.target) || event.repeat) return;
-      const id = findAction(event.key === " " ? "Space" : event.key);
-      if (id) {
+      const behavior = findBehavior(event.key === " " ? "Space" : event.key);
+      if (behavior) {
         event.preventDefault();
-        void startAction(id);
+        void startBehavior(behavior);
       }
     };
     const onKeyUp = (event: KeyboardEvent) => {
       if (
         !editable(event.target) &&
-        findAction(event.key === " " ? "Space" : event.key)
+        findBehavior(event.key === " " ? "Space" : event.key)
       )
         sendStop();
     };
@@ -572,7 +612,7 @@ export function LiveControlPage({ board }: { board: Board | null }) {
       window.removeEventListener("blur", onBlur);
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [actions, sendStop, startAction]);
+  }, [controlMethod, enabledBehaviors, sendStop, shortcutForBehavior, startBehavior]);
   useEffect(
     () => () => {
       if (endpoint)
@@ -696,19 +736,24 @@ export function LiveControlPage({ board }: { board: Board | null }) {
     minFrequency: 1,
     maxFrequency: 500,
   };
-  const duplicateChannels = new Set(channels).size !== 4;
-  const updateAction = <K extends keyof ActionConfig>(
-    id: ActionId,
-    key: K,
-    value: ActionConfig[K],
-  ) => {
-    setActions((current) => ({
-      ...current,
-      [id]: { ...current[id], [key]: value },
-    }));
-    if (key === "valid" && value === false && activeAction === id) sendStop();
-  };
-
+  const invalidChannelIds = new Set(
+    channels
+      .filter((channel) => {
+        const frequency = Number(channel.channel_freq_hz);
+        const duration = Number(channel.channel_stim_duration_ms);
+        return (
+          !channel.channel_name.trim() ||
+          channel.channel_pin_1 === channel.channel_pin_2 ||
+          !Number.isFinite(frequency) ||
+          frequency < bounds.minFrequency ||
+          frequency > bounds.maxFrequency ||
+          !Number.isFinite(duration) ||
+          duration < bounds.minDurationMs ||
+          duration > bounds.maxDurationMs
+        );
+      })
+      .map((channel) => channel.id),
+  );
   return (
     <section
       className="relative h-dvh min-h-[640px] overflow-hidden bg-zinc-950 text-white"
@@ -756,9 +801,9 @@ export function LiveControlPage({ board }: { board: Board | null }) {
         </span>
       </div>
       <Crosshair />
-      {activeAction && (
+      {activeBehaviorId !== null && (
         <div className="absolute left-1/2 top-[60%] z-10 -translate-x-1/2 rounded-full border border-white/30 bg-zinc-950/75 px-4 py-2 text-xs font-medium text-white backdrop-blur-md">
-          Active: {actionMeta[activeAction].label}
+          Active: {behaviors.find((behavior) => behavior.id === activeBehaviorId)?.name ?? "Behavior"}
         </div>
       )}
       {photoCapturing && (
@@ -771,7 +816,7 @@ export function LiveControlPage({ board }: { board: Board | null }) {
           {photoError}
         </div>
       )}
-      <div className="absolute bottom-6 left-5 z-20 flex gap-3 sm:bottom-8 sm:left-7">
+      <div className="absolute bottom-5 left-5 z-20 flex items-center gap-2 sm:bottom-7 sm:left-7">
         <button
           type="button"
           className={hudButtonClass(settingsOpen)}
@@ -792,36 +837,38 @@ export function LiveControlPage({ board }: { board: Board | null }) {
           <CameraIcon className="size-6" />
         </button>
       </div>
-      <div className="absolute bottom-5 right-5 z-20 grid grid-cols-3 grid-rows-3 gap-2 sm:bottom-7 sm:right-7">
-        {(Object.keys(actionMeta) as ActionId[])
-          .filter((id) => actions[id].valid)
-          .map((id) => {
-            const meta = actionMeta[id];
-            const Icon = meta.icon;
+      {controlMethod === "buttons" && (
+      <div className="absolute bottom-5 right-5 z-20 flex max-w-[calc(100vw-9rem)] items-center justify-end gap-2 overflow-x-auto sm:bottom-7 sm:right-7 sm:max-w-[calc(100vw-11rem)]">
+        {enabledBehaviors
+          .map((behavior) => {
+            const meta = behaviorMeta(behavior.name);
+            const channelUnavailable =
+              invalidChannelIds.has(behavior.channel_id) ||
+              !controlChannels.some((channel) => channel.id === behavior.channel_id);
             return (
               <button
-                key={id}
+                key={behavior.id}
                 type="button"
-                disabled={!endpoint || duplicateChannels}
-                className={`${hudButtonClass(activeAction === id)} ${meta.position} disabled:cursor-not-allowed disabled:opacity-40`}
-                aria-label={`${meta.label}, shortcut ${actions[id].key}`}
-                title={`${meta.label} · ${actions[id].key}`}
+                disabled={!endpoint || channelUnavailable}
+                className={`${hudButtonClass(activeBehaviorId === behavior.id)} min-w-20 shrink-0 px-3 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40`}
+                aria-label={`${meta.label}, shortcut ${shortcutForBehavior(behavior)}`}
+                title={`${meta.label} · ${shortcutForBehavior(behavior)}`}
                 onPointerDown={(event) => {
                   event.preventDefault();
-                  void startAction(id);
+                  void startBehavior(behavior);
                 }}
                 onPointerUp={() => sendStop()}
                 onPointerCancel={() => sendStop()}
                 onPointerLeave={() => {
-                  if (activeAction === id) sendStop();
+                  if (activeBehaviorId === behavior.id) sendStop();
                 }}
               >
-                <Icon className="size-6" />
-                <span className="sr-only">{meta.label}</span>
+                <span>{meta.label}</span>
               </button>
             );
           })}
       </div>
+      )}
 
       {boardPickerOpen && (
         <div className="absolute inset-0 z-[60] grid place-items-center bg-black/75 p-5 backdrop-blur-md">
@@ -998,6 +1045,65 @@ export function LiveControlPage({ board }: { board: Board | null }) {
           <button
             type="button"
             className="flex w-full items-center justify-between border-b border-zinc-800 pb-3 text-left"
+            aria-expanded={expandedSettingsSection === "control"}
+            aria-controls="settings-control"
+            onClick={() =>
+              setExpandedSettingsSection((current) =>
+                current === "control" ? null : "control",
+              )
+            }
+          >
+            <span className="text-sm font-semibold uppercase tracking-[.12em] text-zinc-100">
+              Control Settings
+            </span>
+            <ChevronDownIcon
+              className={`size-4 text-zinc-400 transition-transform ${expandedSettingsSection === "control" ? "rotate-180" : ""}`}
+            />
+          </button>
+          </h3>
+          {expandedSettingsSection === "control" && (
+            <div id="settings-control" className="mt-4 grid gap-4">
+              <label className="grid gap-1.5 text-xs text-zinc-300">
+                <span>Species</span>
+                <Select
+                  value={controlSpeciesId ?? ""}
+                  onChange={(event) => {
+                    sendStop();
+                    setSelectedSpeciesId(event.target.value ? Number(event.target.value) : null);
+                  }}
+                >
+                  {!speciesRecords.length && <option value="">No species registered</option>}
+                  {speciesRecords.map((species) => (
+                    <option key={species.species_id} value={species.species_id}>
+                      {species.code} · {species.scientific_name}
+                    </option>
+                  ))}
+                </Select>
+              </label>
+              <label className="grid gap-1.5 text-xs text-zinc-300">
+                <span>Control Method</span>
+                <Select
+                  value={controlMethod}
+                  onChange={(event) => {
+                    sendStop();
+                    setControlMethod(event.target.value as ControlMethod);
+                  }}
+                >
+                  <option value="buttons">On-screen Buttons</option>
+                  <option value="keyboard">Keyboard</option>
+                </Select>
+              </label>
+              <p className="text-xs leading-5 text-zinc-500">
+                The selected Species determines which enabled Behaviors and Channels are available.
+              </p>
+            </div>
+          )}
+        </section>
+        <section className="mt-8">
+          <h3>
+          <button
+            type="button"
+            className="flex w-full items-center justify-between border-b border-zinc-800 pb-3 text-left"
             aria-expanded={expandedSettingsSection === "camera"}
             aria-controls="settings-camera"
             onClick={() =>
@@ -1153,163 +1259,86 @@ export function LiveControlPage({ board }: { board: Board | null }) {
           <button
             type="button"
             className="flex w-full items-center justify-between border-b border-zinc-800 pb-3 text-left"
-            aria-expanded={expandedSettingsSection === "channels"}
-            aria-controls="settings-channels"
+            aria-expanded={expandedSettingsSection === "shortcuts"}
+            aria-controls="settings-shortcuts"
             onClick={() =>
               setExpandedSettingsSection((current) =>
-                current === "channels" ? null : "channels",
+                current === "shortcuts" ? null : "shortcuts",
               )
             }
           >
             <span className="text-sm font-semibold uppercase tracking-[.12em] text-zinc-100">
-              Channel Settings
+              Shortcut Control
             </span>
             <ChevronDownIcon
-              className={`size-4 text-zinc-400 transition-transform ${expandedSettingsSection === "channels" ? "rotate-180" : ""}`}
+              className={`size-4 text-zinc-400 transition-transform ${expandedSettingsSection === "shortcuts" ? "rotate-180" : ""}`}
             />
           </button>
           </h3>
-          {expandedSettingsSection === "channels" && (
-            <div id="settings-channels">
+          {expandedSettingsSection === "shortcuts" && (
+          <div id="settings-shortcuts">
           <p className="mt-3 text-xs leading-5 text-zinc-500">
-            D numbers are XIAO board labels, not raw ESP32 GPIO numbers. All four channels must be unique.
-          </p>
-          <div className="mt-4 grid grid-cols-2 gap-3">
-            {channelLabels.map((label, index) => (
-              <label key={label} className="grid gap-1.5 text-xs text-zinc-300">
-                <span>{label}</span>
-                <Select
-                  value={channels[index]}
-                  onChange={(event) =>
-                    setChannels((current) =>
-                      current.map((pin, pinIndex) =>
-                        pinIndex === index ? Number(event.target.value) : pin,
-                      ),
-                    )
-                  }
-                >
-                  {pinOptions.map((pin) => (
-                    <option key={pin} value={pin}>
-                      D{pin}
-                    </option>
-                  ))}
-                </Select>
-              </label>
-            ))}
-          </div>
-          {duplicateChannels && (
-            <p className="mt-3 text-xs text-red-300">
-              Duplicate channels detected. Action controls are disabled.
-            </p>
-          )}
-            </div>
-          )}
-        </section>
-        <section className="mt-8">
-          <h3>
-          <button
-            type="button"
-            className="flex w-full items-center justify-between border-b border-zinc-800 pb-3 text-left"
-            aria-expanded={expandedSettingsSection === "actions"}
-            aria-controls="settings-actions"
-            onClick={() =>
-              setExpandedSettingsSection((current) =>
-                current === "actions" ? null : "actions",
-              )
-            }
-          >
-            <span className="text-sm font-semibold uppercase tracking-[.12em] text-zinc-100">
-              Action Settings
-            </span>
-            <ChevronDownIcon
-              className={`size-4 text-zinc-400 transition-transform ${expandedSettingsSection === "actions" ? "rotate-180" : ""}`}
-            />
-          </button>
-          </h3>
-          {expandedSettingsSection === "actions" && (
-          <div id="settings-actions">
-          <p className="mt-3 text-xs leading-5 text-zinc-500">
-            Invalid actions do not display a button or respond to the keyboard. Releasing a key or losing window focus sends
-            stop immediately.
+            Temporarily override shortcuts for enabled Behaviors of the selected Species. Changes reset when this page reloads.
           </p>
           <div className="mt-4 grid gap-4">
-            {(Object.keys(actionMeta) as ActionId[]).map((id) => {
-              const config = actions[id];
-              return (
+            {enabledBehaviors.map((behavior) => (
                 <article
-                  key={id}
-                  className={`rounded-xl border p-4 ${config.valid ? "border-zinc-700 bg-zinc-900/70" : "border-zinc-800 bg-zinc-950 opacity-60"}`}
+                  key={behavior.id}
+                  className="rounded-xl border border-zinc-700 bg-zinc-900/70 p-4"
                 >
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <strong className="text-sm">
-                        {actionMeta[id].label}
-                      </strong>
-                      <p className="mt-1 text-[11px] text-zinc-500">
-                        API: {id} · {actionMeta[id].pair}
-                      </p>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <strong className="block truncate text-sm">{behavior.name}</strong>
+                      <p className="mt-1 truncate text-[11px] text-zinc-500">{behavior.channel_name}</p>
                     </div>
-                    <label className="flex items-center gap-2 text-xs text-zinc-300">
-                      <span>{config.valid ? "Valid" : "Invalid"}</span>
-                      <input
-                        className="size-4 accent-zinc-100"
-                        type="checkbox"
-                        checked={config.valid}
-                        onChange={(event) =>
-                          updateAction(id, "valid", event.target.checked)
-                        }
-                      />
-                    </label>
-                  </div>
-                  <div className="mt-4 grid gap-3">
-                    <div className="grid grid-cols-2 gap-3">
-                      <label className="grid gap-1.5 text-xs text-zinc-300">
-                        <span>Frequency (Hz)</span>
-                        <Input
-                          type="number"
-                          min={bounds.minFrequency}
-                          max={bounds.maxFrequency}
-                          step="any"
-                          value={config.frequencyHz}
-                          onChange={(event) =>
-                            updateAction(id, "frequencyHz", event.target.value)
-                          }
-                        />
-                      </label>
-                      <label className="grid gap-1.5 text-xs text-zinc-300">
-                        <span>Stimulation Duration (ms)</span>
-                        <Input
-                          type="number"
-                          min={bounds.minDurationMs}
-                          max={bounds.maxDurationMs}
-                          step="1"
-                          value={config.durationMs}
-                          onChange={(event) =>
-                            updateAction(id, "durationMs", event.target.value)
-                          }
-                        />
-                      </label>
-                    </div>
-                    <label className="grid gap-1.5 text-xs text-zinc-300">
-                      <span>Keyboard Shortcut</span>
+                    <div className="w-36 shrink-0">
                       <Select
-                        value={config.key}
-                        onChange={(event) =>
-                          updateAction(id, "key", event.target.value)
-                        }
+                        aria-label={`${behavior.name} shortcut`}
+                        value={shortcutForBehavior(behavior)}
+                        onChange={(event) => {
+                          sendStop();
+                          setShortcutOverrides((current) => ({
+                            ...current,
+                            [behavior.id]: event.target.value,
+                          }));
+                        }}
                       >
                         {shortcutKeys.map((key) => (
-                          <option key={key} value={key}>
+                          <option
+                            key={key}
+                            value={key}
+                            disabled={enabledBehaviors.some(
+                              (other) =>
+                                other.id !== behavior.id &&
+                                shortcutForBehavior(other).toLowerCase() === key.toLowerCase(),
+                            )}
+                          >
                             {key}
                           </option>
                         ))}
                       </Select>
-                    </label>
+                    </div>
                   </div>
                 </article>
-              );
-            })}
+              ))}
+            {!enabledBehaviors.length && <p className="text-xs text-zinc-500">No enabled Behaviors are registered for this Species.</p>}
           </div>
+          {enabledBehaviors.some((behavior) => shortcutOverrides[behavior.id] !== undefined) && (
+            <button
+              type="button"
+              className="mt-4 w-full rounded-lg border border-zinc-700 px-3 py-2 text-xs font-medium text-zinc-300 hover:bg-zinc-800 hover:text-white"
+              onClick={() => {
+                sendStop();
+                setShortcutOverrides((current) => {
+                  const next = { ...current };
+                  enabledBehaviors.forEach((behavior) => delete next[behavior.id]);
+                  return next;
+                });
+              }}
+            >
+              Reset to Default Shortcuts
+            </button>
+          )}
           </div>
           )}
         </section>

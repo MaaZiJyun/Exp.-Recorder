@@ -10,7 +10,7 @@ import { Card } from "@/components/circo/primitives";
 export function PlansPage({ ctx }: { ctx: RecorderContext }) {
   const { notice, setNotice } = ctx;
   return <div className="grid min-w-0 gap-6">
-    <PageHeader eyebrow="Filters" title="Plans" subtitle="Prepare stimulation plans for a selected experiment." />
+    <PageHeader eyebrow="Test" title="Plans" subtitle="Prepare stimulation plans for a selected experiment." />
     <Notice notice={notice} onClose={() => setNotice(null)} />
     <Card><ExperimentPicker ctx={ctx} /></Card>
     <ExperimentPlansPanel ctx={ctx} />

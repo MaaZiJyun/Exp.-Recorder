@@ -83,7 +83,7 @@ export function ExperimentsPage({ ctx }: { ctx: RecorderContext }) {
 
   return <div className="grid min-w-0 gap-6">
     <PageHeader
-      eyebrow="Filters"
+      eyebrow="Test"
       title="Experiments"
       subtitle="Create and manage experiment records used by plans and trials."
     />

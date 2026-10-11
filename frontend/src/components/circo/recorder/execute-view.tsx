@@ -583,7 +583,7 @@ export function ExecuteView({ ctx }: { ctx: RecorderContext }) {
                   hint={
                     positions.length
                       ? "Codes are joined in order when saved."
-                      : "Create positions under Filters > Positions first."
+                      : "Create positions under Method > Positions first."
                   }
                 >
                   <Select

@@ -2,8 +2,6 @@
 
 import { useState } from "react";
 import { AppShell, type PageId } from "@/components/circo/app-shell";
-import { Badge } from "@/components/circo/primitives";
-import { appConfig } from "@/config/app-config";
 import { HardwarePage } from "@/components/circo/pages/hardware-page";
 import { ChannelsPage } from "@/components/circo/pages/channels-page";
 import { BehaviorsPage } from "@/components/circo/pages/behaviors-page";
@@ -24,7 +22,7 @@ import type { Board } from "./types";
 
 export default function Home() {
   const ctx = useRecorder();
-  const { devices, ready, changeSection, changeWorkspace } = ctx;
+  const { changeSection, changeWorkspace } = ctx;
   const [activePage, setActivePage] = useState<PageId>("index");
   const [controlBoard, setControlBoard] = useState<Board | null>(null);
 
@@ -65,20 +63,6 @@ export default function Home() {
     <AppShell
       activePage={activePage}
       onPageChange={changePage}
-      status={
-        <div className="grid gap-2">
-          <Badge tone={ready ? "success" : "neutral"}>
-            {devices
-              ? ready
-                ? "SYSTEM READY"
-                : "HARDWARE OFFLINE"
-              : "API OFFLINE"}
-          </Badge>
-          <p className="text-xs leading-5 text-zinc-500">
-            {appConfig.software.runtime.join(" · ")}
-          </p>
-        </div>
-      }
     >
       {content[activePage]}
     </AppShell>

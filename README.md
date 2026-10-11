@@ -33,7 +33,7 @@ Exp.-Recorder 是一套本地运行的实验管理、视频记录与电刺激控
 
 ## 2. 当前 WebApp 功能
 
-侧边栏按 Resources、Filters 和 Operation 三组组织功能。
+侧边栏按 Resources、Method、Test 和 Operation 四组组织功能。
 
 ### Resources
 
@@ -55,13 +55,18 @@ Hardware 页面还提供 XIAO ESP32S3 健康检查：
 
 > 健康检查和固件烧录可能覆盖控制板中已有程序，请先确认选择的是库存板而非正在执行实验的设备。
 
-### Filters
+### Method
 
 | 页面 | 已实现功能 |
 | --- | --- |
 | **Positions** | 按物种管理刺激位置；复用物种参考图并在图上标记坐标；支持通用位置、搜索、预览和编辑。 |
 | **Channels** | 按物种注册双引脚刺激 Channel；为 D0–D8 引脚关联昆虫 Position，并管理频率和刺激时长。 |
 | **Behavior** | 按物种定义行为，关联已注册的 Channel、默认快捷键和 on/off 状态。 |
+
+### Test
+
+| 页面 | 已实现功能 |
+| --- | --- |
 | **Experiments** | 创建实验标题和说明，作为 Plans 与 Trials 的上级记录；已有 Trial 的实验不能直接删除。 |
 | **Plans** | 为选定实验批量选择对象，配置两处刺激位置、波形、电平、占空比、频率、持续时间、次数、间隔和计划 Trial 数；显示 Pending/In Progress/Completed 进度。 |
 | **Trials** | 按实验查看、搜索和编辑 Trial；播放视频和查看位置图；修改刺激参数、状态与行为标注；导出 CSV 或清理实验数据。 |

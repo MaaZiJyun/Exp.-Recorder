@@ -172,7 +172,7 @@ export function ChannelsPage() {
   );
 
   return <div className="grid min-w-0 gap-8">
-    <PageHeader eyebrow="Filters" title="Channels" subtitle="Register species-specific stimulation channels, pin mappings, positions, frequency, and duration." />
+    <PageHeader eyebrow="Method" title="Channels" subtitle="Register species-specific stimulation channels, pin mappings, positions, frequency, and duration." />
     {message ? <Alert tone={message.tone}>{message.text}</Alert> : null}
     <Card>
       <Field label="Species">

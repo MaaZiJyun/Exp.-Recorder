@@ -262,7 +262,6 @@ export function LiveControlPage({ board }: { board: Board | null }) {
   const [speciesRecords, setSpeciesRecords] = useState<SpeciesRecord[]>([]);
   const [selectedSpeciesId, setSelectedSpeciesId] = useState<number | null>(null);
   const [controlMethod, setControlMethod] = useState<ControlMethod>("buttons");
-  const [gamepadSupported, setGamepadSupported] = useState<boolean | null>(null);
   const [gamepadName, setGamepadName] = useState<string | null>(null);
   const [endpoint, setEndpoint] = useState<Endpoint | null>(null);
   const [availableBoards, setAvailableBoards] = useState<Endpoint[]>([]);
@@ -291,6 +290,8 @@ export function LiveControlPage({ board }: { board: Board | null }) {
   const [streamFailed, setStreamFailed] = useState(false);
   const connectionAttempt = useRef(0);
   const requestedBoard = useRef<string | null | undefined>(undefined);
+  const gamepadSupported =
+    typeof navigator !== "undefined" && typeof navigator.getGamepads === "function";
   const controlSpeciesId =
     selectedSpeciesId !== null &&
     speciesRecords.some((species) => species.species_id === selectedSpeciesId)
@@ -646,7 +647,6 @@ export function LiveControlPage({ board }: { board: Board | null }) {
 
   useEffect(() => {
     const supported = typeof navigator.getGamepads === "function";
-    setGamepadSupported(supported);
     if (!supported) return;
 
     const refreshGamepad = () => {

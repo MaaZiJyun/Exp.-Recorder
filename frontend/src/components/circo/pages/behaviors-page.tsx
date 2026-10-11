@@ -146,7 +146,7 @@ export function BehaviorsPage() {
   const canSave = Boolean(draft.species_id && draft.name.trim() && draft.channel_id && draft.default_shortcut);
 
   return <div className="grid min-w-0 gap-8">
-    <PageHeader eyebrow="Filters" title="Behavior" subtitle="Define species-specific behaviors, their stimulation channels, shortcuts, and availability in Live Control." />
+    <PageHeader eyebrow="Method" title="Behavior" subtitle="Define species-specific behaviors, their stimulation channels, shortcuts, and availability in Live Control." />
     {message ? <Alert tone={message.tone}>{message.text}</Alert> : null}
     <Card>
       <Field label="Species">

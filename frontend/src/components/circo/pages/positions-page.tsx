@@ -15,7 +15,7 @@ export function PositionsPage({ ctx }: { ctx: RecorderContext }) {
     : speciesRecords[0]?.code ?? "__general__";
 
   return <div className="grid min-w-0 gap-6">
-    <PageHeader eyebrow="Filters" title="Positions" subtitle="Manage reusable stimulation positions and image markers." />
+    <PageHeader eyebrow="Method" title="Positions" subtitle="Manage reusable stimulation positions and image markers." />
     <Notice notice={notice} onClose={() => setNotice(null)} />
     <Card><Field label="Species"><Select value={speciesCode} onChange={(event) => setSelectedSpeciesCode(event.target.value)}><option value="__general__">General positions</option>{speciesRecords.map((species) => <option key={species.species_id} value={species.code}>{species.code} · {species.scientific_name}</option>)}</Select></Field></Card>
     <PositionCardsPanel ctx={ctx} speciesCode={speciesCode} />

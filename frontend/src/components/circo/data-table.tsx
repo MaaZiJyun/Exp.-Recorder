@@ -39,6 +39,8 @@ type SortState = {
   direction: "ascending" | "descending";
 };
 
+const PAGE_SIZE = 20;
+
 type DataTableProps<T> = {
   rows: T[];
   columns: DataTableColumn<T>[];
@@ -103,6 +105,7 @@ export function DataTable<T,>({
   const [selectedId, setSelectedId] = useState<Key | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenu<T> | null>(null);
   const [sort, setSort] = useState<SortState | null>(null);
+  const [page, setPage] = useState(1);
 
   const selectedRow = useMemo(
     () => rows.find((row) => getRowId(row) === selectedId) ?? null,
@@ -140,7 +143,17 @@ export function DataTable<T,>({
       .map(({ row }) => row);
   }, [columns, filteredRows, sort]);
 
+  const pageCount = Math.max(1, Math.ceil(visibleRows.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount);
+  const paginatedRows = useMemo(
+    () => visibleRows.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
+    [currentPage, visibleRows],
+  );
+  const firstVisibleRow = visibleRows.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
+  const lastVisibleRow = Math.min(currentPage * PAGE_SIZE, visibleRows.length);
+
   const toggleSort = (columnKey: string) => {
+    setPage(1);
     setSort((current) => ({
       columnKey,
       direction:
@@ -169,17 +182,19 @@ export function DataTable<T,>({
   }, [contextMenu]);
 
   const rowActions = (row: T): DataTableAction<T>[] => [
-    {
-      key: "read",
-      label: "Read",
-      onSelect: async (record: T) => {
-        setSelectedId(getRowId(record));
-        await onRead?.(record);
-      },
-      disabled: isReadDisabled,
-    },
+    ...(onRead
+      ? [{
+          key: "detail",
+          label: "Detail",
+          onSelect: async (record: T) => {
+            setSelectedId(getRowId(record));
+            await onRead(record);
+          },
+          disabled: isReadDisabled,
+        } satisfies DataTableAction<T>]
+      : []),
     ...(onUpdate
-      ? [{ key: "update", label: "Update", onSelect: onUpdate, disabled: isUpdateDisabled } satisfies DataTableAction<T>]
+      ? [{ key: "edit", label: "Edit", onSelect: onUpdate, disabled: isUpdateDisabled } satisfies DataTableAction<T>]
       : []),
     ...(onDelete
       ? [
@@ -211,7 +226,10 @@ export function DataTable<T,>({
         <input
           type="search"
           value={query}
-          onChange={(event) => setQuery(event.target.value)}
+          onChange={(event) => {
+            setQuery(event.target.value);
+            setPage(1);
+          }}
           placeholder={searchPlaceholder}
           className="h-10 w-full rounded-xl border border-zinc-200 bg-white pl-9 pr-3 text-sm text-zinc-950 outline-none transition placeholder:text-zinc-400 focus:border-zinc-400 focus:ring-2 focus:ring-zinc-200/70 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-50 dark:focus:border-zinc-600 dark:focus:ring-zinc-800"
         />
@@ -293,7 +311,7 @@ export function DataTable<T,>({
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-100 bg-white dark:divide-zinc-800 dark:bg-zinc-950">
-                {visibleRows.map((row) => {
+                {paginatedRows.map((row) => {
                   const rowId = getRowId(row);
                   const selected = rowId === selectedId;
                   return (
@@ -346,6 +364,37 @@ export function DataTable<T,>({
               </tbody>
             </table>
           </div>
+          {visibleRows.length ? (
+            <nav
+              aria-label="Table pagination"
+              className="flex flex-wrap items-center justify-between gap-3 border-t border-zinc-200 bg-zinc-50/70 px-4 py-3 text-sm dark:border-zinc-800 dark:bg-zinc-900/60"
+            >
+              <p className="text-zinc-500 dark:text-zinc-400">
+                {firstVisibleRow}–{lastVisibleRow} of {visibleRows.length}
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={currentPage === 1}
+                  onClick={() => setPage(currentPage - 1)}
+                  className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 font-medium text-zinc-700 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                >
+                  Previous
+                </button>
+                <span className="min-w-20 text-center text-zinc-600 dark:text-zinc-300">
+                  {currentPage} / {pageCount}
+                </span>
+                <button
+                  type="button"
+                  disabled={currentPage === pageCount}
+                  onClick={() => setPage(currentPage + 1)}
+                  className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 font-medium text-zinc-700 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                >
+                  Next
+                </button>
+              </div>
+            </nav>
+          ) : null}
         </div>
       </div>
 

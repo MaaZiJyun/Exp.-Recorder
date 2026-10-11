@@ -369,6 +369,16 @@ class DatabaseManager:
             ).fetchall()
             return [self._position_dict(row) for row in rows]
 
+    def list_stimulation_position_options(self) -> List[Dict[str, Any]]:
+        """Return the lightweight position fields needed by relationship editors."""
+        with self.get_connection() as conn:
+            rows = conn.execute(
+                """SELECT position_id, code, species
+                FROM stimulation_positions
+                ORDER BY code COLLATE NOCASE, position_id"""
+            ).fetchall()
+            return [dict(row) for row in rows]
+
     def list_subject_position_combination_statistics(
         self, experiment_id: Optional[int] = None
     ) -> List[Dict[str, Any]]:

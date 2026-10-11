@@ -35,8 +35,8 @@ function PositionOverview({ positions }: { positions: StimulationPosition[] }) {
 
 function PositionInfo({ position }: { position: StimulationPosition }) {
   return <div className="grid gap-3">
-    {position.image ? <div className="relative overflow-hidden rounded-lg border border-zinc-200 bg-zinc-100">
-      <img src={position.image} alt={`Position ${position.code}`} className="max-h-52 w-full object-contain" />
+    {position.image ? <div className="relative mx-auto w-fit max-w-full overflow-hidden rounded-lg border border-zinc-200 bg-zinc-100">
+      <img src={position.image} alt={`Position ${position.code}`} className="block max-h-52 max-w-full" />
       {position.mark ? <span className="absolute size-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-red-500 shadow" style={{ left: `${position.mark.x * 100}%`, top: `${position.mark.y * 100}%` }} /> : null}
     </div> : null}
     <dl className="grid gap-2 text-sm">

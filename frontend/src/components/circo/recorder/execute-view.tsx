@@ -15,7 +15,6 @@ import { TrialPositionPreview } from "./trial-position-preview";
 export function ExecuteView({ ctx }: { ctx: RecorderContext }) {
   const {
     devices,
-    task,
     experiments,
     runExperimentId,
     subjects,
@@ -57,7 +56,6 @@ export function ExecuteView({ ctx }: { ctx: RecorderContext }) {
     savePendingTrial,
     discardPendingTrial,
     selectExperimentPlan,
-    logWindowRef,
   } = ctx;
 
   return (
@@ -655,51 +653,6 @@ export function ExecuteView({ ctx }: { ctx: RecorderContext }) {
         </section>
       </section>
 
-      <section id="experiment-logs" className="mt-5 grid scroll-mt-6 gap-5 rounded-xl bg-zinc-950 p-5 text-zinc-100 md:grid-cols-[240px_minmax(0,1fr)]">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-[10px] font-medium tracking-[.15em] text-zinc-500">CURRENT RUN</p>
-            <h2 className="mt-1 text-xl font-medium">
-              {running
-                ? `Trial ${task.result?.trial_no ?? "in progress"}`
-                : task.status === "IDLE"
-                  ? "Standing by"
-                  : task.status}
-            </h2>
-          </div>
-          <div className="rounded-md border border-zinc-700 px-2 py-1 text-[10px] font-medium text-zinc-300">
-            {task.status}
-          </div>
-        </div>
-        <div className="h-1 overflow-hidden bg-zinc-800 md:col-start-1">
-          <span
-            className={`block h-full bg-white ${
-              running
-                ? "w-2/5 animate-pulse"
-                : task.status === "COMPLETED"
-                  ? "w-full"
-                  : "w-0"
-            }`}
-          />
-        </div>
-        <div
-          className="max-h-48 min-h-32 overflow-y-auto font-mono text-xs leading-6 text-zinc-300 md:col-start-2 md:row-span-2 md:row-start-1"
-          ref={logWindowRef}
-          role="log"
-          aria-live="polite"
-        >
-          {task.logs.length === 0 ? (
-            <p className="text-zinc-600">System messages will appear here.</p>
-          ) : (
-            task.logs.map((log, index) => (
-              <div className="grid grid-cols-[5rem_1fr] gap-3" key={`${log.timestamp}-${index}`}>
-                <time className="text-zinc-600">{log.timestamp.slice(11, 19)}</time>
-                <span>{log.message}</span>
-              </div>
-            ))
-          )}
-        </div>
-      </section>
     </>
   );
 }

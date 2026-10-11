@@ -4,17 +4,20 @@ import { useState, type ReactNode } from "react";
 import Image from "next/image";
 import {
   BeakerIcon,
+  BookOpenIcon,
   ChevronDownIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
   CircleStackIcon,
-  FunnelIcon,
+  ComputerDesktopIcon,
   HomeIcon,
+  KeyIcon,
 } from "@heroicons/react/24/outline";
 import { appConfig } from "@/config/app-config";
 
 export type PageId =
-  | "index"
+  | "homepage"
+  | "guide"
   | "species"
   | "subjects"
   | "materials-tools"
@@ -46,7 +49,7 @@ const navigationGroups = [
   },
   {
     label: "Method",
-    icon: FunnelIcon,
+    icon: KeyIcon,
     items: [
       ["positions", "Positions"],
       ["channels", "Channels"],
@@ -64,7 +67,7 @@ const navigationGroups = [
   },
   {
     label: "Operation",
-    icon: BeakerIcon,
+    icon: ComputerDesktopIcon,
     items: [
       ["signal-generation", "Signal Generation"],
       ["live-control", "Live Control"],
@@ -92,10 +95,12 @@ export function AppShell({
   const toggleGroup = (label: string) => {
     if (sidebarCollapsed) {
       setSidebarCollapsed(false);
-      setExpandedGroups((current) => ({ ...current, [label]: true }));
+      setExpandedGroups({ [label]: true });
       return;
     }
-    setExpandedGroups((current) => ({ ...current, [label]: !current[label] }));
+    setExpandedGroups((current) =>
+      current[label] ? {} : { [label]: true },
+    );
   };
 
   return <div className="flex min-h-dvh max-w-full overflow-x-hidden bg-white text-zinc-950 lg:h-dvh lg:overflow-hidden">
@@ -104,9 +109,9 @@ export function AppShell({
         {!sidebarCollapsed ? (
           <button
             type="button"
-            onClick={() => onPageChange("index")}
+            onClick={() => onPageChange("homepage")}
             className="flex min-w-0 flex-1 items-center gap-3 rounded-xl px-2 text-left"
-            title="Index"
+            title="Homepage"
           >
             <span className="grid size-10 shrink-0 place-items-center rounded-lg border border-zinc-200 bg-white">
               <Image src={appConfig.icon} width={24} height={24} alt="" priority />
@@ -128,20 +133,30 @@ export function AppShell({
         </button>
       </div>
 
-      <button type="button" onClick={() => onPageChange("index")} className="mb-6 grid size-11 place-items-center self-center rounded-lg border border-zinc-200 bg-white sm:hidden" title="Index">
+      <button type="button" onClick={() => onPageChange("homepage")} className="mb-6 grid size-11 place-items-center self-center rounded-lg border border-zinc-200 bg-white sm:hidden" title="Homepage">
         <Image src={appConfig.icon} width={24} height={24} alt={appConfig.name} priority />
       </button>
 
       <nav className="grid gap-2" aria-label="Main navigation">
         <button
           type="button"
-          onClick={() => onPageChange("index")}
-          aria-current={activePage === "index" ? "page" : undefined}
-          title="Index"
-          className={`flex min-h-10 items-center rounded-lg px-3 text-sm font-semibold transition-colors ${sidebarCollapsed ? "justify-center" : "justify-center sm:justify-start sm:gap-3"} ${activePage === "index" ? "bg-zinc-950 text-white" : "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-950"}`}
+          onClick={() => onPageChange("homepage")}
+          aria-current={activePage === "homepage" ? "page" : undefined}
+          title="Homepage"
+          className={`flex min-h-10 items-center rounded-lg px-3 text-sm font-semibold transition-colors ${sidebarCollapsed ? "justify-center" : "justify-center sm:justify-start sm:gap-3"} ${activePage === "homepage" ? "bg-zinc-950 text-white" : "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-950"}`}
         >
           <HomeIcon className="size-5 shrink-0" />
-          {!sidebarCollapsed ? <span className="hidden sm:block">Index</span> : null}
+          {!sidebarCollapsed ? <span className="hidden sm:block">Homepage</span> : null}
+        </button>
+        <button
+          type="button"
+          onClick={() => onPageChange("guide")}
+          aria-current={activePage === "guide" ? "page" : undefined}
+          title="Guide"
+          className={`flex min-h-10 items-center rounded-lg px-3 text-sm font-semibold transition-colors ${sidebarCollapsed ? "justify-center" : "justify-center sm:justify-start sm:gap-3"} ${activePage === "guide" ? "bg-zinc-950 text-white" : "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-950"}`}
+        >
+          <BookOpenIcon className="size-5 shrink-0" />
+          {!sidebarCollapsed ? <span className="hidden sm:block">Guide</span> : null}
         </button>
 
         {navigationGroups.map((group) => {

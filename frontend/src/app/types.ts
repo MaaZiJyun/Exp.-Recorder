@@ -158,6 +158,11 @@ export type StimulationPosition = {
   channel_count: number;
 };
 
+export type StimulationPositionOption = Pick<
+  StimulationPosition,
+  "position_id" | "code" | "species"
+>;
+
 export type StimulationChannel = {
   id: number;
   species_id: number;

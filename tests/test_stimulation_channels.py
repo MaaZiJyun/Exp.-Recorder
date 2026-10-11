@@ -71,6 +71,17 @@ class TestStimulationChannels(unittest.TestCase):
                 **{**self.payload, "channel_pin_2_position_id": self.position_1}
             )
 
+    def test_position_options_exclude_large_image_fields(self):
+        options = self.db.list_stimulation_position_options()
+        self.assertEqual(
+            options,
+            [
+                {"position_id": self.position_1, "code": "LF", "species": "CRICKET"},
+                {"position_id": self.position_2, "code": "RF", "species": "CRICKET"},
+            ],
+        )
+        self.assertNotIn("image", options[0])
+
 
 if __name__ == "__main__":
     unittest.main()

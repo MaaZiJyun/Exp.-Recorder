@@ -6,7 +6,8 @@ import { HardwarePage } from "@/components/circo/pages/hardware-page";
 import { ChannelsPage } from "@/components/circo/pages/channels-page";
 import { BehaviorsPage } from "@/components/circo/pages/behaviors-page";
 import { ExperimentsPage } from "@/components/circo/pages/experiments-page";
-import { IndexPage } from "@/components/circo/pages/index-page";
+import { GuidePage } from "@/components/circo/pages/guide-page";
+import { HomepagePage } from "@/components/circo/pages/homepage-page";
 import { LiveControlPage } from "@/components/circo/pages/live-control-page";
 import { LogsPage } from "@/components/circo/pages/logs-page";
 import { MaterialsToolsPage } from "@/components/circo/pages/materials-tools-page";
@@ -23,7 +24,7 @@ import type { Board } from "./types";
 export default function Home() {
   const ctx = useRecorder();
   const { changeSection, changeWorkspace } = ctx;
-  const [activePage, setActivePage] = useState<PageId>("index");
+  const [activePage, setActivePage] = useState<PageId>("homepage");
   const [controlBoard, setControlBoard] = useState<Board | null>(null);
 
   const changePage = (page: PageId) => {
@@ -42,7 +43,8 @@ export default function Home() {
   };
 
   const content = {
-    index: <IndexPage onNavigate={changePage} />,
+    homepage: <HomepagePage onNavigate={changePage} />,
+    guide: <GuidePage />,
     species: <SpeciesPage ctx={ctx} />,
     subjects: <SubjectsPage ctx={ctx} />,
     "materials-tools": <MaterialsToolsPage />,

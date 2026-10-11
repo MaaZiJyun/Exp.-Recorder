@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { PlusIcon } from "@heroicons/react/20/solid";
 import { api } from "@/app/lib";
-import type { SpeciesRecord, StimulationChannel, StimulationPosition } from "@/app/types";
+import type { SpeciesRecord, StimulationChannel, StimulationPositionOption } from "@/app/types";
 import { DataTable, type DataTableColumn } from "@/components/circo/data-table";
 import { PageHeader, SectionHeader } from "@/components/circo/page-elements";
 import { Alert, Badge, Button, Card, Dialog, Field, Input, Select } from "@/components/circo/primitives";
@@ -63,7 +63,7 @@ const columns: DataTableColumn<StimulationChannel>[] = [
 export function ChannelsPage() {
   const [channels, setChannels] = useState<StimulationChannel[]>([]);
   const [species, setSpecies] = useState<SpeciesRecord[]>([]);
-  const [positions, setPositions] = useState<StimulationPosition[]>([]);
+  const [positions, setPositions] = useState<StimulationPositionOption[]>([]);
   const [selectedSpeciesId, setSelectedSpeciesId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -77,7 +77,7 @@ export function ChannelsPage() {
       const [channelRecords, speciesRecords, positionRecords] = await Promise.all([
         api<StimulationChannel[]>("/stimulation-channels"),
         api<SpeciesRecord[]>("/species"),
-        api<StimulationPosition[]>("/stimulation-positions"),
+        api<StimulationPositionOption[]>("/stimulation-position-options"),
       ]);
       setChannels(channelRecords);
       setSpecies(speciesRecords);

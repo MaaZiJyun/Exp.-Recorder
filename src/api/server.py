@@ -1136,6 +1136,10 @@ def create_app(mock: bool = False, db_path: Optional[Path] = None) -> FastAPI:
     def stimulation_positions() -> list[dict[str, Any]]:
         return controller.db.list_stimulation_positions()
 
+    @app.get("/api/stimulation-position-options")
+    def stimulation_position_options() -> list[dict[str, Any]]:
+        return controller.db.list_stimulation_position_options()
+
     @app.get("/api/statistics/subject-position-combinations")
     def subject_position_combination_statistics(
         experiment_id: Optional[int] = Query(default=None, ge=1),

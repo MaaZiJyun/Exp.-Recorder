@@ -19,7 +19,7 @@ export function Badge({ children, tone = "neutral" }: { children: React.ReactNod
     warning: "border-amber-200 bg-amber-50 text-amber-800",
     danger: "border-red-200 bg-red-50 text-red-700",
   };
-  return <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium ${styles[tone]}`}>{children}</span>;
+  return <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${styles[tone]}`}>{children}</span>;
 }
 
 export function Alert({ children, tone = "info" }: { children: React.ReactNode; tone?: "info" | "success" | "warning" | "danger" }) {

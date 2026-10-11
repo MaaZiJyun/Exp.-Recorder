@@ -35,6 +35,9 @@ Exp.-Recorder 是一套本地运行的实验管理、视频记录与电刺激控
 
 侧边栏按 Resources、Method、Test 和 Operation 四组组织功能。
 
+- **Homepage**：介绍 Cyborg Lab 的用途、核心模块和实验工作流程。
+- **Guide**：提供安装与运行教程；当前包含 macOS 和 Windows 的 Get Started。
+
 ### Resources
 
 | 页面 | 已实现功能 |
@@ -82,7 +85,7 @@ Hardware 页面还提供 XIAO ESP32S3 健康检查：
 - 显示 SDG1022X 与 XIAO 相机连接状态，并支持重新连接。
 - 选择实验、对象和实验计划，也可直接填写刺激与录像参数。
 - 实时预览 USB 相机画面，支持镜像和 90° 旋转显示。
-- 异步执行 Trial，持续显示运行状态和日志，不阻塞页面操作。
+- 异步执行 Trial，不阻塞页面操作；运行日志统一在 Logs 页面查看。
 - 完成后立即回放视频和位置图；填写 latency、action、degree 后确认保存，或丢弃本次 Trial 及视频。
 - 计划 Trial 保存后自动更新完成进度。
 

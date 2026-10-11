@@ -10,6 +10,7 @@ import {
   ArrowUpIcon,
   Battery50Icon,
   CameraIcon,
+  ChevronDownIcon,
   Cog6ToothIcon,
   XMarkIcon,
 } from "@heroicons/react/24/outline";
@@ -18,6 +19,7 @@ import { api } from "@/app/lib";
 import { Input, Select } from "@/components/circo/primitives";
 
 type ActionId = "forward" | "back" | "left" | "right";
+type SettingsSectionId = "connection" | "camera" | "channels" | "actions";
 type ActionConfig = {
   valid: boolean;
   frequencyHz: string;
@@ -220,6 +222,8 @@ function CameraRange({
 export function LiveControlPage({ board }: { board: Board | null }) {
   const [now, setNow] = useState<Date | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [expandedSettingsSection, setExpandedSettingsSection] =
+    useState<SettingsSectionId | null>(null);
   const [activeAction, setActiveAction] = useState<ActionId | null>(null);
   const [actions, setActions] =
     useState<Record<ActionId, ActionConfig>>(defaultActions);
@@ -751,11 +755,6 @@ export function LiveControlPage({ board }: { board: Board | null }) {
           Received FPS: {streamFps ?? "--"}
         </span>
       </div>
-      <div
-        className={`absolute left-1/2 top-5 z-20 max-w-[55vw] -translate-x-1/2 rounded-full border px-4 py-2 text-center text-xs backdrop-blur-md ${connectionState === "connected" ? "border-green-500/40 bg-green-950/75 text-green-200" : connectionState === "error" ? "border-red-500/40 bg-red-950/75 text-red-200" : "border-zinc-700 bg-zinc-950/75 text-zinc-300"}`}
-      >
-        {message ?? "Waiting for connection"}
-      </div>
       <Crosshair />
       {activeAction && (
         <div className="absolute left-1/2 top-[60%] z-10 -translate-x-1/2 rounded-full border border-white/30 bg-zinc-950/75 px-4 py-2 text-xs font-medium text-white backdrop-blur-md">
@@ -936,27 +935,39 @@ export function LiveControlPage({ board }: { board: Board | null }) {
           </button>
         </header>
         <section>
-          <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
-            <h3 className="text-sm font-semibold uppercase tracking-[.12em] text-zinc-100">
+          <h3>
+          <button
+            type="button"
+            className="flex w-full items-center justify-between border-b border-zinc-800 pb-3 text-left"
+            aria-expanded={expandedSettingsSection === "connection"}
+            aria-controls="settings-connection"
+            onClick={() =>
+              setExpandedSettingsSection((current) =>
+                current === "connection" ? null : "connection",
+              )
+            }
+          >
+            <span className="text-sm font-semibold uppercase tracking-[.12em] text-zinc-100">
               Connection
-            </h3>
-            <button
-              type="button"
-              disabled={connectionState === "discovering"}
-              className="flex items-center gap-1.5 text-xs text-zinc-300 hover:text-white disabled:opacity-40"
-              onClick={() => void discover()}
-            >
-              <ArrowPathIcon
-                className={`size-4 ${connectionState === "discovering" ? "animate-spin" : ""}`}
-              />
-              Switch Board
-            </button>
-          </div>
-          <dl className="mt-4 grid gap-2 rounded-xl border border-zinc-800 bg-zinc-900/70 p-4 text-xs">
+            </span>
+            <ChevronDownIcon
+              className={`size-4 text-zinc-400 transition-transform ${expandedSettingsSection === "connection" ? "rotate-180" : ""}`}
+            />
+          </button>
+          </h3>
+          {expandedSettingsSection === "connection" && (
+            <div id="settings-connection" className="mt-4">
+          <dl className="grid gap-2 text-xs">
             <div className="flex justify-between gap-3">
-              <dt className="text-zinc-500">Target board</dt>
+              <dt className="text-zinc-500">Hardware name</dt>
               <dd className="text-right">
-                {endpoint ? `${endpoint.model ?? "XIAO"} · ${displayMac(endpoint.mac)}` : "Not connected"}
+                {endpoint?.model ?? (endpoint ? "XIAO" : "Not connected")}
+              </dd>
+            </div>
+            <div className="flex justify-between gap-3">
+              <dt className="text-zinc-500">MAC address</dt>
+              <dd className="font-mono text-right">
+                {endpoint ? displayMac(endpoint.mac) : "—"}
               </dd>
             </div>
             <div className="flex justify-between gap-3">
@@ -968,17 +979,49 @@ export function LiveControlPage({ board }: { board: Board | null }) {
               <dd>{controllerConfig?.networkMode ?? "—"}</dd>
             </div>
           </dl>
+            <button
+              type="button"
+              disabled={connectionState === "discovering"}
+              className="mt-4 flex min-h-10 w-full items-center justify-center gap-2 rounded-lg border border-zinc-700 bg-zinc-900/70 px-4 text-xs font-medium text-zinc-200 transition-colors hover:border-zinc-600 hover:bg-zinc-800 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+              onClick={() => void discover()}
+            >
+              <ArrowPathIcon
+                className={`size-4 ${connectionState === "discovering" ? "animate-spin" : ""}`}
+              />
+              Switch Board
+            </button>
+            </div>
+          )}
         </section>
         <section className="mt-8">
-          <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
-            <h3 className="text-sm font-semibold uppercase tracking-[.12em] text-zinc-100">
-              Camera Settings
-            </h3>
-            {cameraSaving && (
-              <span className="text-xs text-amber-300">Saving…</span>
-            )}
-          </div>
-          {!cameraSettings ? (
+          <h3>
+          <button
+            type="button"
+            className="flex w-full items-center justify-between border-b border-zinc-800 pb-3 text-left"
+            aria-expanded={expandedSettingsSection === "camera"}
+            aria-controls="settings-camera"
+            onClick={() =>
+              setExpandedSettingsSection((current) =>
+                current === "camera" ? null : "camera",
+              )
+            }
+          >
+            <span className="flex items-center gap-3">
+              <span className="text-sm font-semibold uppercase tracking-[.12em] text-zinc-100">
+                Camera Settings
+              </span>
+              {cameraSaving && (
+                <span className="text-xs text-amber-300">Saving…</span>
+              )}
+            </span>
+            <ChevronDownIcon
+              className={`size-4 text-zinc-400 transition-transform ${expandedSettingsSection === "camera" ? "rotate-180" : ""}`}
+            />
+          </button>
+          </h3>
+          {expandedSettingsSection === "camera" && (
+            <div id="settings-camera">
+            {!cameraSettings ? (
             <p
               className={`mt-3 text-xs leading-5 ${cameraError ? "text-red-300" : "text-zinc-500"}`}
             >
@@ -1101,12 +1144,33 @@ export function LiveControlPage({ board }: { board: Board | null }) {
                 </p>
               )}
             </div>
+            )}
+            </div>
           )}
         </section>
         <section className="mt-8">
-          <h3 className="border-b border-zinc-800 pb-3 text-sm font-semibold uppercase tracking-[.12em] text-zinc-100">
-            Channel Settings
+          <h3>
+          <button
+            type="button"
+            className="flex w-full items-center justify-between border-b border-zinc-800 pb-3 text-left"
+            aria-expanded={expandedSettingsSection === "channels"}
+            aria-controls="settings-channels"
+            onClick={() =>
+              setExpandedSettingsSection((current) =>
+                current === "channels" ? null : "channels",
+              )
+            }
+          >
+            <span className="text-sm font-semibold uppercase tracking-[.12em] text-zinc-100">
+              Channel Settings
+            </span>
+            <ChevronDownIcon
+              className={`size-4 text-zinc-400 transition-transform ${expandedSettingsSection === "channels" ? "rotate-180" : ""}`}
+            />
+          </button>
           </h3>
+          {expandedSettingsSection === "channels" && (
+            <div id="settings-channels">
           <p className="mt-3 text-xs leading-5 text-zinc-500">
             D numbers are XIAO board labels, not raw ESP32 GPIO numbers. All four channels must be unique.
           </p>
@@ -1138,11 +1202,32 @@ export function LiveControlPage({ board }: { board: Board | null }) {
               Duplicate channels detected. Action controls are disabled.
             </p>
           )}
+            </div>
+          )}
         </section>
         <section className="mt-8">
-          <h3 className="border-b border-zinc-800 pb-3 text-sm font-semibold uppercase tracking-[.12em] text-zinc-100">
-            Action Settings
+          <h3>
+          <button
+            type="button"
+            className="flex w-full items-center justify-between border-b border-zinc-800 pb-3 text-left"
+            aria-expanded={expandedSettingsSection === "actions"}
+            aria-controls="settings-actions"
+            onClick={() =>
+              setExpandedSettingsSection((current) =>
+                current === "actions" ? null : "actions",
+              )
+            }
+          >
+            <span className="text-sm font-semibold uppercase tracking-[.12em] text-zinc-100">
+              Action Settings
+            </span>
+            <ChevronDownIcon
+              className={`size-4 text-zinc-400 transition-transform ${expandedSettingsSection === "actions" ? "rotate-180" : ""}`}
+            />
+          </button>
           </h3>
+          {expandedSettingsSection === "actions" && (
+          <div id="settings-actions">
           <p className="mt-3 text-xs leading-5 text-zinc-500">
             Invalid actions do not display a button or respond to the keyboard. Releasing a key or losing window focus sends
             stop immediately.
@@ -1225,6 +1310,8 @@ export function LiveControlPage({ board }: { board: Board | null }) {
               );
             })}
           </div>
+          </div>
+          )}
         </section>
       </aside>
     </section>

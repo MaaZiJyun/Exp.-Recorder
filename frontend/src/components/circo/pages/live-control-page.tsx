@@ -15,7 +15,7 @@ import { api } from "@/app/lib";
 import { Select } from "@/components/circo/primitives";
 
 type SettingsSectionId = "connection" | "control" | "camera" | "shortcuts";
-type ControlMethod = "buttons" | "keyboard";
+type ControlMethod = "buttons" | "keyboard" | "gamepad";
 type Endpoint = {
   ipAddress: string;
   controlPort: number;
@@ -99,17 +99,25 @@ const actionMeta: Record<
   },
 };
 const pinOptions = Array.from({ length: 9 }, (_, index) => index);
-const shortcutKeys = [
-  "W",
-  "A",
-  "S",
-  "D",
-  "ArrowUp",
-  "ArrowDown",
-  "ArrowLeft",
-  "ArrowRight",
-  "Space",
-];
+const gamepadButtonNames: Record<number, string> = {
+  0: "A / Cross",
+  1: "B / Circle",
+  2: "X / Square",
+  3: "Y / Triangle",
+  4: "LB / L1",
+  5: "RB / R1",
+  6: "LT / L2",
+  7: "RT / R2",
+  8: "Back / Share",
+  9: "Start / Options",
+  10: "Left Stick Press",
+  11: "Right Stick Press",
+  12: "D-pad Up",
+  13: "D-pad Down",
+  14: "D-pad Left",
+  15: "D-pad Right",
+  16: "Home",
+};
 
 function normalizedMac(value: string) {
   return value.replace(/[^0-9a-f]/gi, "").toUpperCase();
@@ -136,6 +144,42 @@ function behaviorMeta(name: string) {
   return actionMeta[normalizedName] ?? {
     label: name,
   };
+}
+
+function gamepadShortcut(gamepad: Gamepad): string | null {
+  for (const index of [12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 16]) {
+    const button = gamepad.buttons[index];
+    if (button?.pressed || (button?.value ?? 0) > 0.55) return `Gamepad:Button${index}`;
+  }
+
+  const horizontal = gamepad.axes[0] ?? 0;
+  const vertical = gamepad.axes[1] ?? 0;
+  const deadZone = 0.55;
+  if (Math.abs(horizontal) < deadZone && Math.abs(vertical) < deadZone) return null;
+  if (Math.abs(horizontal) > Math.abs(vertical)) {
+    return horizontal < 0 ? "Gamepad:LeftStickLeft" : "Gamepad:LeftStickRight";
+  }
+  return vertical < 0 ? "Gamepad:LeftStickUp" : "Gamepad:LeftStickDown";
+}
+
+function shortcutLabel(shortcut: string) {
+  const buttonMatch = /^Gamepad:Button(\d+)$/.exec(shortcut);
+  if (buttonMatch) {
+    const index = Number(buttonMatch[1]);
+    return `Gamepad · ${gamepadButtonNames[index] ?? `Button ${index}`}`;
+  }
+  const stickLabels: Record<string, string> = {
+    "Gamepad:LeftStickUp": "Gamepad · Left Stick Up",
+    "Gamepad:LeftStickDown": "Gamepad · Left Stick Down",
+    "Gamepad:LeftStickLeft": "Gamepad · Left Stick Left",
+    "Gamepad:LeftStickRight": "Gamepad · Left Stick Right",
+  };
+  return stickLabels[shortcut] ?? shortcut;
+}
+
+function keyboardShortcut(event: KeyboardEvent) {
+  if (event.key === " ") return "Space";
+  return event.key.length === 1 ? event.key.toUpperCase() : event.key;
 }
 
 async function imageBlobResolution(blob: Blob): Promise<string | null> {
@@ -212,10 +256,14 @@ export function LiveControlPage({ board }: { board: Board | null }) {
   const [activeBehaviorId, setActiveBehaviorId] = useState<number | null>(null);
   const [behaviors, setBehaviors] = useState<Behavior[]>([]);
   const [shortcutOverrides, setShortcutOverrides] = useState<Record<number, string>>({});
+  const [listeningBehaviorId, setListeningBehaviorId] = useState<number | null>(null);
+  const [shortcutCaptureError, setShortcutCaptureError] = useState<string | null>(null);
   const [channels, setChannels] = useState<StimulationChannel[]>([]);
   const [speciesRecords, setSpeciesRecords] = useState<SpeciesRecord[]>([]);
   const [selectedSpeciesId, setSelectedSpeciesId] = useState<number | null>(null);
   const [controlMethod, setControlMethod] = useState<ControlMethod>("buttons");
+  const [gamepadSupported, setGamepadSupported] = useState<boolean | null>(null);
+  const [gamepadName, setGamepadName] = useState<string | null>(null);
   const [endpoint, setEndpoint] = useState<Endpoint | null>(null);
   const [availableBoards, setAvailableBoards] = useState<Endpoint[]>([]);
   const [boardPickerOpen, setBoardPickerOpen] = useState(board === null);
@@ -248,17 +296,40 @@ export function LiveControlPage({ board }: { board: Board | null }) {
     speciesRecords.some((species) => species.species_id === selectedSpeciesId)
       ? selectedSpeciesId
       : speciesRecords[0]?.species_id ?? null;
-  const controlChannels = channels.filter(
-    (channel) => channel.species_id === controlSpeciesId,
+  const controlChannels = useMemo(
+    () => channels.filter((channel) => channel.species_id === controlSpeciesId),
+    [channels, controlSpeciesId],
   );
-  const enabledBehaviors = behaviors.filter(
-    (behavior) =>
-      behavior.species_id === controlSpeciesId && behavior.status === "on",
+  const enabledBehaviors = useMemo(
+    () => behaviors.filter(
+      (behavior) =>
+        behavior.species_id === controlSpeciesId && behavior.status === "on",
+    ),
+    [behaviors, controlSpeciesId],
   );
   const shortcutForBehavior = useCallback(
     (behavior: Behavior) =>
       shortcutOverrides[behavior.id] ?? behavior.default_shortcut,
     [shortcutOverrides],
+  );
+  const captureShortcut = useCallback(
+    (behaviorId: number, shortcut: string) => {
+      const duplicate = enabledBehaviors.find(
+        (behavior) =>
+          behavior.id !== behaviorId &&
+          shortcutForBehavior(behavior).toLowerCase() === shortcut.toLowerCase(),
+      );
+      if (duplicate) {
+        setShortcutCaptureError(
+          `${shortcutLabel(shortcut)} is already assigned to ${duplicate.name}.`,
+        );
+      } else {
+        setShortcutOverrides((current) => ({ ...current, [behaviorId]: shortcut }));
+        setShortcutCaptureError(null);
+      }
+      setListeningBehaviorId(null);
+    },
+    [enabledBehaviors, shortcutForBehavior],
   );
 
   useEffect(() => {
@@ -574,7 +645,107 @@ export function LiveControlPage({ board }: { board: Board | null }) {
   }, [endpoint, photoCapturing]);
 
   useEffect(() => {
-    if (controlMethod !== "keyboard") return;
+    const supported = typeof navigator.getGamepads === "function";
+    setGamepadSupported(supported);
+    if (!supported) return;
+
+    const refreshGamepad = () => {
+      const connected = Array.from(navigator.getGamepads()).find(
+        (gamepad): gamepad is Gamepad => gamepad !== null && gamepad.connected,
+      );
+      setGamepadName(connected?.id ?? null);
+    };
+    const onConnected = (event: GamepadEvent) => setGamepadName(event.gamepad.id);
+    const onDisconnected = () => refreshGamepad();
+    refreshGamepad();
+    window.addEventListener("gamepadconnected", onConnected);
+    window.addEventListener("gamepaddisconnected", onDisconnected);
+    return () => {
+      window.removeEventListener("gamepadconnected", onConnected);
+      window.removeEventListener("gamepaddisconnected", onDisconnected);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (listeningBehaviorId === null) return;
+    let animationFrame = 0;
+    let gamepadArmed = false;
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.repeat) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.key === "Escape") {
+        setListeningBehaviorId(null);
+        return;
+      }
+      captureShortcut(listeningBehaviorId, keyboardShortcut(event));
+    };
+    const pollGamepad = () => {
+      const gamepad = typeof navigator.getGamepads === "function"
+        ? Array.from(navigator.getGamepads()).find(
+            (candidate): candidate is Gamepad => candidate !== null && candidate.connected,
+          )
+        : undefined;
+      const shortcut = gamepad ? gamepadShortcut(gamepad) : null;
+      if (!shortcut) gamepadArmed = true;
+      else if (gamepadArmed) {
+        captureShortcut(listeningBehaviorId, shortcut);
+        return;
+      }
+      animationFrame = window.requestAnimationFrame(pollGamepad);
+    };
+
+    window.addEventListener("keydown", onKeyDown, true);
+    animationFrame = window.requestAnimationFrame(pollGamepad);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown, true);
+      window.cancelAnimationFrame(animationFrame);
+    };
+  }, [captureShortcut, listeningBehaviorId]);
+
+  useEffect(() => {
+    if (
+      controlMethod !== "gamepad" ||
+      listeningBehaviorId !== null ||
+      typeof navigator.getGamepads !== "function"
+    ) return;
+    let animationFrame = 0;
+    let activeBehavior: number | null = null;
+
+    const pollGamepad = () => {
+      const gamepad = Array.from(navigator.getGamepads()).find(
+        (candidate): candidate is Gamepad => candidate !== null && candidate.connected,
+      );
+      if (gamepad) {
+        setGamepadName((current) => current === gamepad.id ? current : gamepad.id);
+      }
+      const shortcut = gamepad ? gamepadShortcut(gamepad) : null;
+      const behavior = shortcut
+        ? enabledBehaviors.find(
+            (candidate) =>
+              shortcutForBehavior(candidate).toLowerCase() === shortcut.toLowerCase(),
+          )
+        : undefined;
+      const nextBehavior = behavior?.id ?? null;
+
+      if (nextBehavior !== activeBehavior) {
+        if (activeBehavior !== null) sendStop();
+        activeBehavior = nextBehavior;
+        if (behavior) void startBehavior(behavior);
+      }
+      animationFrame = window.requestAnimationFrame(pollGamepad);
+    };
+
+    animationFrame = window.requestAnimationFrame(pollGamepad);
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+      if (activeBehavior !== null) sendStop(true);
+    };
+  }, [controlMethod, enabledBehaviors, listeningBehaviorId, sendStop, shortcutForBehavior, startBehavior]);
+
+  useEffect(() => {
+    if (controlMethod !== "keyboard" || listeningBehaviorId !== null) return;
     const editable = (target: EventTarget | null) =>
       target instanceof HTMLInputElement ||
       target instanceof HTMLSelectElement ||
@@ -612,7 +783,7 @@ export function LiveControlPage({ board }: { board: Board | null }) {
       window.removeEventListener("blur", onBlur);
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [controlMethod, enabledBehaviors, sendStop, shortcutForBehavior, startBehavior]);
+  }, [controlMethod, enabledBehaviors, listeningBehaviorId, sendStop, shortcutForBehavior, startBehavior]);
   useEffect(
     () => () => {
       if (endpoint)
@@ -851,8 +1022,8 @@ export function LiveControlPage({ board }: { board: Board | null }) {
                 type="button"
                 disabled={!endpoint || channelUnavailable}
                 className={`${hudButtonClass(activeBehaviorId === behavior.id)} min-w-20 shrink-0 px-3 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40`}
-                aria-label={`${meta.label}, shortcut ${shortcutForBehavior(behavior)}`}
-                title={`${meta.label} · ${shortcutForBehavior(behavior)}`}
+                aria-label={`${meta.label}, shortcut ${shortcutLabel(shortcutForBehavior(behavior))}`}
+                title={`${meta.label} · ${shortcutLabel(shortcutForBehavior(behavior))}`}
                 onPointerDown={(event) => {
                   event.preventDefault();
                   void startBehavior(behavior);
@@ -1069,6 +1240,7 @@ export function LiveControlPage({ board }: { board: Board | null }) {
                   value={controlSpeciesId ?? ""}
                   onChange={(event) => {
                     sendStop();
+                    setListeningBehaviorId(null);
                     setSelectedSpeciesId(event.target.value ? Number(event.target.value) : null);
                   }}
                 >
@@ -1086,13 +1258,30 @@ export function LiveControlPage({ board }: { board: Board | null }) {
                   value={controlMethod}
                   onChange={(event) => {
                     sendStop();
+                    setListeningBehaviorId(null);
                     setControlMethod(event.target.value as ControlMethod);
+                    event.currentTarget.blur();
                   }}
                 >
                   <option value="buttons">On-screen Buttons</option>
                   <option value="keyboard">Keyboard</option>
+                  <option value="gamepad">USB Gamepad</option>
                 </Select>
               </label>
+              {controlMethod === "gamepad" && (
+                <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-3 text-xs">
+                  <p className={gamepadName ? "text-green-300" : "text-amber-300"}>
+                    {gamepadSupported === false
+                      ? "This browser does not support the Gamepad API."
+                      : gamepadName
+                        ? `Connected: ${gamepadName}`
+                        : "Waiting for a gamepad. Press a button on the controller to activate it."}
+                  </p>
+                  <p className="mt-2 leading-5 text-zinc-500">
+                    Assign gamepad inputs to Behaviors under Shortcut Control below.
+                  </p>
+                </div>
+              )}
               <p className="text-xs leading-5 text-zinc-500">
                 The selected Species determines which enabled Behaviors and Channels are available.
               </p>
@@ -1278,8 +1467,13 @@ export function LiveControlPage({ board }: { board: Board | null }) {
           {expandedSettingsSection === "shortcuts" && (
           <div id="settings-shortcuts">
           <p className="mt-3 text-xs leading-5 text-zinc-500">
-            Temporarily override shortcuts for enabled Behaviors of the selected Species. Changes reset when this page reloads.
+            Click a binding button, then press a keyboard key, gamepad button, D-pad direction, or move the left stick. Changes reset when this page reloads.
           </p>
+          {shortcutCaptureError && (
+            <p className="mt-3 rounded-lg border border-red-900/70 bg-red-950/40 p-3 text-xs text-red-300">
+              {shortcutCaptureError}
+            </p>
+          )}
           <div className="mt-4 grid gap-4">
             {enabledBehaviors.map((behavior) => (
                 <article
@@ -1291,33 +1485,20 @@ export function LiveControlPage({ board }: { board: Board | null }) {
                       <strong className="block truncate text-sm">{behavior.name}</strong>
                       <p className="mt-1 truncate text-[11px] text-zinc-500">{behavior.channel_name}</p>
                     </div>
-                    <div className="w-36 shrink-0">
-                      <Select
-                        aria-label={`${behavior.name} shortcut`}
-                        value={shortcutForBehavior(behavior)}
-                        onChange={(event) => {
-                          sendStop();
-                          setShortcutOverrides((current) => ({
-                            ...current,
-                            [behavior.id]: event.target.value,
-                          }));
-                        }}
-                      >
-                        {shortcutKeys.map((key) => (
-                          <option
-                            key={key}
-                            value={key}
-                            disabled={enabledBehaviors.some(
-                              (other) =>
-                                other.id !== behavior.id &&
-                                shortcutForBehavior(other).toLowerCase() === key.toLowerCase(),
-                            )}
-                          >
-                            {key}
-                          </option>
-                        ))}
-                      </Select>
-                    </div>
+                    <button
+                      type="button"
+                      className={`min-h-10 w-44 shrink-0 rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${listeningBehaviorId === behavior.id ? "border-amber-400 bg-amber-950/60 text-amber-200" : "border-zinc-700 bg-zinc-950 text-zinc-200 hover:border-zinc-500 hover:bg-zinc-800"}`}
+                      aria-label={`Change ${behavior.name} shortcut`}
+                      onClick={() => {
+                        sendStop();
+                        setShortcutCaptureError(null);
+                        setListeningBehaviorId((current) => current === behavior.id ? null : behavior.id);
+                      }}
+                    >
+                      {listeningBehaviorId === behavior.id
+                        ? "Press key or button…"
+                        : shortcutLabel(shortcutForBehavior(behavior))}
+                    </button>
                   </div>
                 </article>
               ))}
@@ -1329,6 +1510,8 @@ export function LiveControlPage({ board }: { board: Board | null }) {
               className="mt-4 w-full rounded-lg border border-zinc-700 px-3 py-2 text-xs font-medium text-zinc-300 hover:bg-zinc-800 hover:text-white"
               onClick={() => {
                 sendStop();
+                setListeningBehaviorId(null);
+                setShortcutCaptureError(null);
                 setShortcutOverrides((current) => {
                   const next = { ...current };
                   enabledBehaviors.forEach((behavior) => delete next[behavior.id]);

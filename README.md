@@ -93,7 +93,8 @@ Hardware 页面还提供 XIAO ESP32S3 健康检查：
 
 - 扫描并选择当前局域网内已登记的控制板。
 - 显示 MJPEG 实时画面、接收帧率、十字准线和连接信息。
-- 在 Control Settings 选择 Species，并切换屏幕方向按钮或 Keyboard 控制方式。
+- 在 Control Settings 选择 Species，并切换屏幕按钮、Keyboard 或 USB Gamepad 控制方式。
+- USB Gamepad 通过浏览器 Gamepad API 读取；可在 Shortcut Control 点击监听按钮，再按键盘键、手柄按钮、D-pad 或推动左摇杆，为 Behavior 建立临时映射。
 - 在 Shortcut Control 临时覆盖当前物种已启用 Behavior 的快捷键；刷新 Live Control 后恢复数据库中的默认值。
 - 通过界面按钮或键盘快捷键执行数据库中定义的 Behavior。
 - 从数据库加载当前物种的 Behavior 及其双引脚刺激 Channel；只有 `status=on` 的 Behavior 可以在 Live Control 中执行。

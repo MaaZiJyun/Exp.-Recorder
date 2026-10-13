@@ -98,7 +98,6 @@ const actionMeta: Record<
     label: "Right",
   },
 };
-const pinOptions = Array.from({ length: 9 }, (_, index) => index);
 const gamepadButtonNames: Record<number, string> = {
   0: "A / Cross",
   1: "B / Circle",
@@ -127,16 +126,11 @@ function displayMac(value: string) {
   return normalizedMac(value).match(/.{1,2}/g)?.join(":") ?? value;
 }
 
-function commandPinsForBehavior(name: string, channel: StimulationChannel) {
-  if (channel.channel_pin_1 === channel.channel_pin_2) return null;
-  const normalizedName = name.trim().toLowerCase();
-  const secondaryIndex = normalizedName === "right" ? 1 : normalizedName === "left" ? 2 : 3;
-  const fillers = pinOptions.filter(
-    (pin) => pin !== channel.channel_pin_1 && pin !== channel.channel_pin_2,
+function requestStimulationStop(endpoint: Endpoint, keepalive = false) {
+  return fetch(
+    `http://${endpoint.ipAddress}:${endpoint.controlPort}/stimulation/stop`,
+    { method: "POST", keepalive },
   );
-  const pins = [channel.channel_pin_1, ...fillers.slice(0, 3)];
-  pins[secondaryIndex] = channel.channel_pin_2;
-  return pins;
 }
 
 function behaviorMeta(name: string) {
@@ -290,6 +284,8 @@ export function LiveControlPage({ board }: { board: Board | null }) {
   const [streamFailed, setStreamFailed] = useState(false);
   const connectionAttempt = useRef(0);
   const requestedBoard = useRef<string | null | undefined>(undefined);
+  const stimulationRequest = useRef(0);
+  const activeBehaviorTimer = useRef<number | null>(null);
   const gamepadSupported =
     typeof navigator !== "undefined" && typeof navigator.getGamepads === "function";
   const controlSpeciesId =
@@ -332,6 +328,14 @@ export function LiveControlPage({ board }: { board: Board | null }) {
     },
     [enabledBehaviors, shortcutForBehavior],
   );
+
+  const clearActiveBehavior = useCallback(() => {
+    if (activeBehaviorTimer.current !== null) {
+      window.clearTimeout(activeBehaviorTimer.current);
+      activeBehaviorTimer.current = null;
+    }
+    setActiveBehaviorId(null);
+  }, []);
 
   useEffect(() => {
     const initial = window.setTimeout(() => setNow(new Date()), 0);
@@ -377,12 +381,10 @@ export function LiveControlPage({ board }: { board: Board | null }) {
     setConnectingMac(target.mac);
     setConnectionState("discovering");
     setMessage(`Connecting to ${target.model ?? "XIAO"} · ${target.ipAddress}…`);
-    setActiveBehaviorId(null);
+    stimulationRequest.current += 1;
+    clearActiveBehavior();
     if (endpoint) {
-      void fetch(
-        `http://${endpoint.ipAddress}:${endpoint.controlPort}/command?name=stop`,
-        { method: "POST", keepalive: true },
-      ).catch(() => undefined);
+      void requestStimulationStop(endpoint, true).catch(() => undefined);
     }
     setEndpoint(null);
     setControllerConfig(null);
@@ -442,16 +444,14 @@ export function LiveControlPage({ board }: { board: Board | null }) {
     } finally {
       if (attempt === connectionAttempt.current) setConnectingMac(null);
     }
-  }, [endpoint]);
+  }, [clearActiveBehavior, endpoint]);
 
   const discover = useCallback(async (autoConnectMac?: string | null) => {
     const attempt = ++connectionAttempt.current;
-    setActiveBehaviorId(null);
+    stimulationRequest.current += 1;
+    clearActiveBehavior();
     if (endpoint) {
-      void fetch(
-        `http://${endpoint.ipAddress}:${endpoint.controlPort}/command?name=stop`,
-        { method: "POST", keepalive: true },
-      ).catch(() => undefined);
+      void requestStimulationStop(endpoint, true).catch(() => undefined);
     }
     setConnectionState("discovering");
     setMessage("Discovering controllable boards on the LAN…");
@@ -492,7 +492,7 @@ export function LiveControlPage({ board }: { board: Board | null }) {
       setConnectionState(endpoint ? "connected" : "error");
       setMessage(error instanceof Error ? error.message : "Board discovery failed");
     }
-  }, [connectToBoard, endpoint]);
+  }, [clearActiveBehavior, connectToBoard, endpoint]);
 
   useEffect(() => {
     const targetMac = board?.mac ?? null;
@@ -504,14 +504,12 @@ export function LiveControlPage({ board }: { board: Board | null }) {
 
   const sendStop = useCallback(
     (keepalive = false) => {
-      setActiveBehaviorId(null);
+      stimulationRequest.current += 1;
+      clearActiveBehavior();
       if (endpoint)
-        void fetch(
-          `http://${endpoint.ipAddress}:${endpoint.controlPort}/command?name=stop`,
-          { method: "POST", keepalive },
-        ).catch(() => undefined);
+        void requestStimulationStop(endpoint, keepalive).catch(() => undefined);
     },
-    [endpoint],
+    [clearActiveBehavior, endpoint],
   );
 
   const startBehavior = useCallback(
@@ -521,13 +519,20 @@ export function LiveControlPage({ board }: { board: Board | null }) {
         (item) =>
           item.id === behavior.channel_id && item.species_id === controlSpeciesId,
       );
-      const commandPins = channel ? commandPinsForBehavior(behavior.name, channel) : null;
+      const pin1 = Number(channel?.channel_pin_1);
+      const pin2 = Number(channel?.channel_pin_2);
       const frequency = Number(channel?.channel_freq_hz);
       const duration = Number(channel?.channel_stim_duration_ms);
       if (
         !channel ||
-        !commandPins ||
         !channel.channel_name.trim() ||
+        !Number.isInteger(pin1) ||
+        !Number.isInteger(pin2) ||
+        pin1 < 0 ||
+        pin1 > 8 ||
+        pin2 < 0 ||
+        pin2 > 8 ||
+        pin1 === pin2 ||
         !Number.isFinite(frequency) ||
         frequency < (controllerConfig?.minFrequency ?? 1) ||
         frequency > (controllerConfig?.maxFrequency ?? 500) ||
@@ -538,39 +543,41 @@ export function LiveControlPage({ board }: { board: Board | null }) {
         setMessage("Select a valid channel for this behavior and check its pins, frequency, and duration.");
         return;
       }
-      const query = new URLSearchParams({
-        name: behavior.name,
-        behavior_id: String(behavior.id),
-        channel_id: String(channel.id),
-        species_id: String(channel.species_id),
-        channel_name: channel.channel_name,
-        channel_pin_1: String(channel.channel_pin_1),
-        channel_pin_2: String(channel.channel_pin_2),
-        channel_freq_hz: String(channel.channel_freq_hz),
-        channel_stim_duration_ms: String(channel.channel_stim_duration_ms),
-        chnl1: String(commandPins[0]),
-        chnl2: String(commandPins[1]),
-        chnl3: String(commandPins[2]),
-        chnl4: String(commandPins[3]),
-        durationMs: String(channel.channel_stim_duration_ms),
-        frequency: String(channel.channel_freq_hz),
-      });
+      const requestId = ++stimulationRequest.current;
+      clearActiveBehavior();
       setActiveBehaviorId(behavior.id);
       try {
         const response = await fetch(
-          `http://${endpoint.ipAddress}:${endpoint.controlPort}/command?${query}`,
-          { method: "POST" },
+          `http://${endpoint.ipAddress}:${endpoint.controlPort}/stimulation/start`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              pin1,
+              pin2,
+              frequencyHz: frequency,
+              durationMs: duration,
+            }),
+          },
         );
         if (!response.ok)
           throw new Error(
             (await response.text()) || `Behavior request failed (${response.status})`,
           );
+        if (requestId !== stimulationRequest.current) return;
+        activeBehaviorTimer.current = window.setTimeout(() => {
+          if (requestId !== stimulationRequest.current) return;
+          activeBehaviorTimer.current = null;
+          setActiveBehaviorId(null);
+        }, duration);
       } catch (error) {
-        setActiveBehaviorId(null);
-        setMessage(error instanceof Error ? error.message : "Failed to send behavior");
+        if (requestId === stimulationRequest.current) {
+          clearActiveBehavior();
+          setMessage(error instanceof Error ? error.message : "Failed to send behavior");
+        }
       }
     },
-    [boardPickerOpen, channels, controllerConfig, controlSpeciesId, endpoint],
+    [boardPickerOpen, channels, clearActiveBehavior, controllerConfig, controlSpeciesId, endpoint],
   );
 
   const saveCameraSettings = useCallback(
@@ -730,7 +737,6 @@ export function LiveControlPage({ board }: { board: Board | null }) {
       const nextBehavior = behavior?.id ?? null;
 
       if (nextBehavior !== activeBehavior) {
-        if (activeBehavior !== null) sendStop();
         activeBehavior = nextBehavior;
         if (behavior) void startBehavior(behavior);
       }
@@ -740,9 +746,8 @@ export function LiveControlPage({ board }: { board: Board | null }) {
     animationFrame = window.requestAnimationFrame(pollGamepad);
     return () => {
       window.cancelAnimationFrame(animationFrame);
-      if (activeBehavior !== null) sendStop(true);
     };
-  }, [controlMethod, enabledBehaviors, listeningBehaviorId, sendStop, shortcutForBehavior, startBehavior]);
+  }, [controlMethod, enabledBehaviors, listeningBehaviorId, shortcutForBehavior, startBehavior]);
 
   useEffect(() => {
     if (controlMethod !== "keyboard" || listeningBehaviorId !== null) return;
@@ -762,35 +767,28 @@ export function LiveControlPage({ board }: { board: Board | null }) {
         void startBehavior(behavior);
       }
     };
-    const onKeyUp = (event: KeyboardEvent) => {
-      if (
-        !editable(event.target) &&
-        findBehavior(event.key === " " ? "Space" : event.key)
-      )
-        sendStop();
-    };
     const onBlur = () => sendStop(true);
     const onVisibility = () => {
       if (document.hidden) sendStop(true);
     };
     window.addEventListener("keydown", onKeyDown);
-    window.addEventListener("keyup", onKeyUp);
     window.addEventListener("blur", onBlur);
     document.addEventListener("visibilitychange", onVisibility);
     return () => {
       window.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("blur", onBlur);
       document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [controlMethod, enabledBehaviors, listeningBehaviorId, sendStop, shortcutForBehavior, startBehavior]);
   useEffect(
     () => () => {
+      stimulationRequest.current += 1;
+      if (activeBehaviorTimer.current !== null) {
+        window.clearTimeout(activeBehaviorTimer.current);
+        activeBehaviorTimer.current = null;
+      }
       if (endpoint)
-        void fetch(
-          `http://${endpoint.ipAddress}:${endpoint.controlPort}/command?name=stop`,
-          { method: "POST", keepalive: true },
-        ).catch(() => undefined);
+        void requestStimulationStop(endpoint, true).catch(() => undefined);
     },
     [endpoint],
   );
@@ -1024,15 +1022,7 @@ export function LiveControlPage({ board }: { board: Board | null }) {
                 className={`${hudButtonClass(activeBehaviorId === behavior.id)} min-w-20 shrink-0 px-3 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40`}
                 aria-label={`${meta.label}, shortcut ${shortcutLabel(shortcutForBehavior(behavior))}`}
                 title={`${meta.label} · ${shortcutLabel(shortcutForBehavior(behavior))}`}
-                onPointerDown={(event) => {
-                  event.preventDefault();
-                  void startBehavior(behavior);
-                }}
-                onPointerUp={() => sendStop()}
-                onPointerCancel={() => sendStop()}
-                onPointerLeave={() => {
-                  if (activeBehaviorId === behavior.id) sendStop();
-                }}
+                onClick={() => void startBehavior(behavior)}
               >
                 <span>{meta.label}</span>
               </button>

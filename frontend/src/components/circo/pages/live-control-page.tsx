@@ -3,19 +3,32 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  AdjustmentsHorizontalIcon,
   ArrowPathIcon,
   Battery50Icon,
+  BugAntIcon,
   CameraIcon,
   ChevronDownIcon,
   Cog6ToothIcon,
+  CpuChipIcon,
   XMarkIcon,
 } from "@heroicons/react/24/outline";
 import type { Behavior, Board, SpeciesRecord, StimulationChannel } from "@/app/types";
 import { api } from "@/app/lib";
 import { Select } from "@/components/circo/primitives";
 
-type SettingsSectionId = "connection" | "control" | "camera" | "shortcuts";
+type SettingsSectionId = "connection" | "control" | "channels" | "camera" | "shortcuts";
 type ControlMethod = "buttons" | "keyboard" | "gamepad";
+type SavedControlSettings = {
+  speciesId: number;
+  controlMethod: ControlMethod;
+};
+type ChannelOverride = {
+  pin1: number;
+  pin2: number;
+  frequencyHz: string;
+  durationMs: string;
+};
 type Endpoint = {
   ipAddress: string;
   controlPort: number;
@@ -80,6 +93,9 @@ type DiscoveryResponse = {
     video_port: number | null;
   }>;
 };
+
+const CONTROL_SETTINGS_STORAGE_KEY = "exp-recorder:live-control-settings";
+const channelPinOptions = Array.from({ length: 9 }, (_, index) => index);
 
 const actionMeta: Record<
   string,
@@ -176,6 +192,30 @@ function keyboardShortcut(event: KeyboardEvent) {
   return event.key.length === 1 ? event.key.toUpperCase() : event.key;
 }
 
+function isControlMethod(value: unknown): value is ControlMethod {
+  return value === "buttons" || value === "keyboard" || value === "gamepad";
+}
+
+function controlMethodLabel(method: ControlMethod) {
+  return method === "buttons"
+    ? "On-screen Buttons"
+    : method === "keyboard"
+      ? "Keyboard"
+      : "USB Gamepad";
+}
+
+function channelOverrideValue(
+  channel: StimulationChannel,
+  override?: ChannelOverride,
+): ChannelOverride {
+  return override ?? {
+    pin1: channel.channel_pin_1,
+    pin2: channel.channel_pin_2,
+    frequencyHz: String(channel.channel_freq_hz),
+    durationMs: String(channel.channel_stim_duration_ms),
+  };
+}
+
 async function imageBlobResolution(blob: Blob): Promise<string | null> {
   if (typeof createImageBitmap !== "function") return null;
   try {
@@ -253,9 +293,14 @@ export function LiveControlPage({ board }: { board: Board | null }) {
   const [listeningBehaviorId, setListeningBehaviorId] = useState<number | null>(null);
   const [shortcutCaptureError, setShortcutCaptureError] = useState<string | null>(null);
   const [channels, setChannels] = useState<StimulationChannel[]>([]);
+  const [channelOverrides, setChannelOverrides] = useState<Record<number, ChannelOverride>>({});
   const [speciesRecords, setSpeciesRecords] = useState<SpeciesRecord[]>([]);
   const [selectedSpeciesId, setSelectedSpeciesId] = useState<number | null>(null);
   const [controlMethod, setControlMethod] = useState<ControlMethod>("buttons");
+  const [controlSettingsMessage, setControlSettingsMessage] = useState<{
+    tone: "success" | "danger";
+    text: string;
+  } | null>(null);
   const [gamepadName, setGamepadName] = useState<string | null>(null);
   const [endpoint, setEndpoint] = useState<Endpoint | null>(null);
   const [availableBoards, setAvailableBoards] = useState<Endpoint[]>([]);
@@ -281,11 +326,13 @@ export function LiveControlPage({ board }: { board: Board | null }) {
     "idle" | "discovering" | "connected" | "error"
   >("idle");
   const [message, setMessage] = useState<string | null>(null);
+  const [quickActionNotice, setQuickActionNotice] = useState<string | null>(null);
   const [streamFailed, setStreamFailed] = useState(false);
   const connectionAttempt = useRef(0);
   const requestedBoard = useRef<string | null | undefined>(undefined);
   const stimulationRequest = useRef(0);
   const activeBehaviorTimer = useRef<number | null>(null);
+  const quickActionNoticeTimer = useRef<number | null>(null);
   const gamepadSupported =
     typeof navigator !== "undefined" && typeof navigator.getGamepads === "function";
   const controlSpeciesId =
@@ -337,6 +384,38 @@ export function LiveControlPage({ board }: { board: Board | null }) {
     setActiveBehaviorId(null);
   }, []);
 
+  const showQuickActionNotice = useCallback((notice: string) => {
+    if (quickActionNoticeTimer.current !== null) {
+      window.clearTimeout(quickActionNoticeTimer.current);
+    }
+    setQuickActionNotice(notice);
+    quickActionNoticeTimer.current = window.setTimeout(() => {
+      quickActionNoticeTimer.current = null;
+      setQuickActionNotice(null);
+    }, 2200);
+  }, []);
+
+  const updateChannelOverride = useCallback(
+    (channel: StimulationChannel, patch: Partial<ChannelOverride>) => {
+      setChannelOverrides((current) => ({
+        ...current,
+        [channel.id]: {
+          ...channelOverrideValue(channel, current[channel.id]),
+          ...patch,
+        },
+      }));
+    },
+    [],
+  );
+
+  const resetChannelOverride = useCallback((channelId: number) => {
+    setChannelOverrides((current) => {
+      const next = { ...current };
+      delete next[channelId];
+      return next;
+    });
+  }, []);
+
   useEffect(() => {
     const initial = window.setTimeout(() => setNow(new Date()), 0);
     const timer = window.setInterval(() => setNow(new Date()), 1000);
@@ -345,6 +424,54 @@ export function LiveControlPage({ board }: { board: Board | null }) {
       window.clearInterval(timer);
     };
   }, []);
+
+  useEffect(() => {
+    const restore = window.setTimeout(() => {
+      try {
+        const stored = window.localStorage.getItem(CONTROL_SETTINGS_STORAGE_KEY);
+        if (!stored) return;
+        const saved = JSON.parse(stored) as Partial<SavedControlSettings>;
+        if (Number.isSafeInteger(saved.speciesId) && Number(saved.speciesId) > 0) {
+          setSelectedSpeciesId(Number(saved.speciesId));
+        }
+        if (isControlMethod(saved.controlMethod)) {
+          setControlMethod(saved.controlMethod);
+        }
+      } catch {
+        window.localStorage.removeItem(CONTROL_SETTINGS_STORAGE_KEY);
+      }
+    }, 0);
+    return () => window.clearTimeout(restore);
+  }, []);
+
+  const rememberControlSettings = useCallback(() => {
+    if (controlSpeciesId === null) {
+      setControlSettingsMessage({
+        tone: "danger",
+        text: "Select a species before saving these settings.",
+      });
+      return;
+    }
+    try {
+      const settings: SavedControlSettings = {
+        speciesId: controlSpeciesId,
+        controlMethod,
+      };
+      window.localStorage.setItem(
+        CONTROL_SETTINGS_STORAGE_KEY,
+        JSON.stringify(settings),
+      );
+      setControlSettingsMessage({
+        tone: "success",
+        text: "Current control settings will be restored next time.",
+      });
+    } catch {
+      setControlSettingsMessage({
+        tone: "danger",
+        text: "The browser could not save these settings.",
+      });
+    }
+  }, [controlMethod, controlSpeciesId]);
 
   useEffect(() => {
     let active = true;
@@ -512,6 +639,36 @@ export function LiveControlPage({ board }: { board: Board | null }) {
     [clearActiveBehavior, endpoint],
   );
 
+  const cycleControlMethod = useCallback(() => {
+    sendStop();
+    setListeningBehaviorId(null);
+    setControlSettingsMessage(null);
+    const nextMethod =
+      controlMethod === "buttons"
+        ? "keyboard"
+        : controlMethod === "keyboard"
+          ? "gamepad"
+          : "buttons";
+    setControlMethod(nextMethod);
+    showQuickActionNotice(`Mode · ${controlMethodLabel(nextMethod)}`);
+  }, [controlMethod, sendStop, showQuickActionNotice]);
+
+  const cycleSpecies = useCallback(() => {
+    if (!speciesRecords.length) return;
+    sendStop();
+    setListeningBehaviorId(null);
+    setControlSettingsMessage(null);
+    const currentIndex = speciesRecords.findIndex(
+      (species) => species.species_id === controlSpeciesId,
+    );
+    const nextIndex = currentIndex < 0 ? 0 : (currentIndex + 1) % speciesRecords.length;
+    const nextSpecies = speciesRecords[nextIndex];
+    setSelectedSpeciesId(nextSpecies.species_id);
+    showQuickActionNotice(
+      `Protocol · ${nextSpecies.code} · ${nextSpecies.scientific_name}`,
+    );
+  }, [controlSpeciesId, sendStop, showQuickActionNotice, speciesRecords]);
+
   const startBehavior = useCallback(
     async (behavior: Behavior) => {
       if (!endpoint || behavior.status !== "on" || behavior.species_id !== controlSpeciesId || boardPickerOpen) return;
@@ -519,10 +676,13 @@ export function LiveControlPage({ board }: { board: Board | null }) {
         (item) =>
           item.id === behavior.channel_id && item.species_id === controlSpeciesId,
       );
-      const pin1 = Number(channel?.channel_pin_1);
-      const pin2 = Number(channel?.channel_pin_2);
-      const frequency = Number(channel?.channel_freq_hz);
-      const duration = Number(channel?.channel_stim_duration_ms);
+      const settings = channel
+        ? channelOverrideValue(channel, channelOverrides[channel.id])
+        : null;
+      const pin1 = Number(settings?.pin1);
+      const pin2 = Number(settings?.pin2);
+      const frequency = Number(settings?.frequencyHz);
+      const duration = Number(settings?.durationMs);
       if (
         !channel ||
         !channel.channel_name.trim() ||
@@ -537,6 +697,7 @@ export function LiveControlPage({ board }: { board: Board | null }) {
         frequency < (controllerConfig?.minFrequency ?? 1) ||
         frequency > (controllerConfig?.maxFrequency ?? 500) ||
         !Number.isFinite(duration) ||
+        !Number.isInteger(duration) ||
         duration < (controllerConfig?.minDurationMs ?? 1) ||
         duration > (controllerConfig?.maxDurationMs ?? 4294967295)
       ) {
@@ -577,7 +738,7 @@ export function LiveControlPage({ board }: { board: Board | null }) {
         }
       }
     },
-    [boardPickerOpen, channels, clearActiveBehavior, controllerConfig, controlSpeciesId, endpoint],
+    [boardPickerOpen, channelOverrides, channels, clearActiveBehavior, controllerConfig, controlSpeciesId, endpoint],
   );
 
   const saveCameraSettings = useCallback(
@@ -787,6 +948,10 @@ export function LiveControlPage({ board }: { board: Board | null }) {
         window.clearTimeout(activeBehaviorTimer.current);
         activeBehaviorTimer.current = null;
       }
+      if (quickActionNoticeTimer.current !== null) {
+        window.clearTimeout(quickActionNoticeTimer.current);
+        quickActionNoticeTimer.current = null;
+      }
       if (endpoint)
         void requestStimulationStop(endpoint, true).catch(() => undefined);
     },
@@ -908,15 +1073,17 @@ export function LiveControlPage({ board }: { board: Board | null }) {
   const invalidChannelIds = new Set(
     channels
       .filter((channel) => {
-        const frequency = Number(channel.channel_freq_hz);
-        const duration = Number(channel.channel_stim_duration_ms);
+        const settings = channelOverrideValue(channel, channelOverrides[channel.id]);
+        const frequency = Number(settings.frequencyHz);
+        const duration = Number(settings.durationMs);
         return (
           !channel.channel_name.trim() ||
-          channel.channel_pin_1 === channel.channel_pin_2 ||
+          settings.pin1 === settings.pin2 ||
           !Number.isFinite(frequency) ||
           frequency < bounds.minFrequency ||
           frequency > bounds.maxFrequency ||
           !Number.isFinite(duration) ||
+          !Number.isInteger(duration) ||
           duration < bounds.minDurationMs ||
           duration > bounds.maxDurationMs
         );
@@ -985,6 +1152,15 @@ export function LiveControlPage({ board }: { board: Board | null }) {
           {photoError}
         </div>
       )}
+      {quickActionNotice && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="absolute bottom-24 left-1/2 z-30 -translate-x-1/2 rounded-full border border-white/25 bg-zinc-950/85 px-4 py-2 text-sm font-medium text-white shadow-xl backdrop-blur-md"
+        >
+          {quickActionNotice}
+        </div>
+      )}
       <div className="absolute bottom-5 left-5 z-20 flex items-center gap-2 sm:bottom-7 sm:left-7">
         <button
           type="button"
@@ -994,6 +1170,47 @@ export function LiveControlPage({ board }: { board: Board | null }) {
           onClick={() => setSettingsOpen((open) => !open)}
         >
           <Cog6ToothIcon className="size-6" />
+        </button>
+        <button
+          type="button"
+          disabled={!endpoint || connectionState === "discovering" || connectingMac !== null}
+          className={`${hudButtonClass()} disabled:cursor-not-allowed disabled:opacity-40`}
+          aria-label="Refresh board connection"
+          title="Refresh · Reconnect current board"
+          onClick={() => {
+            if (endpoint) void connectToBoard(endpoint);
+          }}
+        >
+          <ArrowPathIcon className={`size-6 ${connectingMac === endpoint?.mac ? "animate-spin" : ""}`} />
+        </button>
+        <button
+          type="button"
+          disabled={connectionState === "discovering" || connectingMac !== null}
+          className={`${hudButtonClass()} disabled:cursor-not-allowed disabled:opacity-40`}
+          aria-label="Switch board"
+          title="Switch · Select another board"
+          onClick={() => void discover()}
+        >
+          <CpuChipIcon className="size-6" />
+        </button>
+        <button
+          type="button"
+          className={hudButtonClass()}
+          aria-label="Switch control mode"
+          title={`Mode · ${controlMethodLabel(controlMethod)}`}
+          onClick={cycleControlMethod}
+        >
+          <AdjustmentsHorizontalIcon className="size-6" />
+        </button>
+        <button
+          type="button"
+          disabled={speciesRecords.length < 2}
+          className={`${hudButtonClass()} disabled:cursor-not-allowed disabled:opacity-40`}
+          aria-label="Switch species protocol"
+          title={`Protocol · ${speciesRecords.find((species) => species.species_id === controlSpeciesId)?.code ?? "No Species"}`}
+          onClick={cycleSpecies}
+        >
+          <BugAntIcon className="size-6" />
         </button>
         <button
           type="button"
@@ -1007,7 +1224,7 @@ export function LiveControlPage({ board }: { board: Board | null }) {
         </button>
       </div>
       {controlMethod === "buttons" && (
-      <div className="absolute bottom-5 right-5 z-20 flex max-w-[calc(100vw-9rem)] items-center justify-end gap-2 overflow-x-auto sm:bottom-7 sm:right-7 sm:max-w-[calc(100vw-11rem)]">
+      <div className="absolute bottom-5 right-5 z-20 flex max-w-[calc(100vw-23rem)] items-center justify-end gap-2 overflow-x-auto sm:bottom-7 sm:right-7 sm:max-w-[calc(100vw-25rem)]">
         {enabledBehaviors
           .map((behavior) => {
             const meta = behaviorMeta(behavior.name);
@@ -1206,6 +1423,142 @@ export function LiveControlPage({ board }: { board: Board | null }) {
           <button
             type="button"
             className="flex w-full items-center justify-between border-b border-zinc-800 pb-3 text-left"
+            aria-expanded={expandedSettingsSection === "channels"}
+            aria-controls="settings-channels"
+            onClick={() =>
+              setExpandedSettingsSection((current) =>
+                current === "channels" ? null : "channels",
+              )
+            }
+          >
+            <span className="text-sm font-semibold uppercase tracking-[.12em] text-zinc-100">
+              Channel Settings
+            </span>
+            <ChevronDownIcon
+              className={`size-4 text-zinc-400 transition-transform ${expandedSettingsSection === "channels" ? "rotate-180" : ""}`}
+            />
+          </button>
+          </h3>
+          {expandedSettingsSection === "channels" && (
+            <div id="settings-channels" className="mt-4 grid gap-3">
+              <p className="text-xs leading-5 text-zinc-500">
+                These overrides apply only to this Live Control session and do not change saved Channel records.
+              </p>
+              {controlChannels.length > 0 && (
+                <div className="grid gap-2">
+                  {controlChannels.map((channel) => {
+                    const settings = channelOverrideValue(channel, channelOverrides[channel.id]);
+                    const modified = channelOverrides[channel.id] !== undefined;
+                    const invalid = invalidChannelIds.has(channel.id);
+                    const fieldClass = `h-8 w-full min-w-0 rounded-md border bg-white px-1.5 text-xs text-zinc-950 outline-none focus:ring-2 ${invalid ? "border-red-400 focus:ring-red-400/40" : "border-zinc-300 focus:ring-sky-400/40"}`;
+                    return (
+                      <article key={channel.id} className="rounded-lg border border-zinc-800 bg-zinc-900/60 px-3 py-2.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span
+                            className="flex min-w-0 items-center gap-1.5 truncate text-xs font-medium text-zinc-100"
+                            title={`#${channel.id} · ${channel.channel_name}`}
+                          >
+                            {modified && <span className="size-1.5 shrink-0 rounded-full bg-amber-400" aria-label="Temporary override" />}
+                            <span className="truncate">{channel.channel_name}</span>
+                          </span>
+                          <button
+                            type="button"
+                            disabled={!modified}
+                            aria-label={`Reset ${channel.channel_name}`}
+                            title={modified ? "Reset temporary changes" : "No temporary changes"}
+                            className="grid size-7 shrink-0 place-items-center rounded-md text-zinc-400 hover:bg-zinc-800 hover:text-white disabled:opacity-20"
+                            onClick={() => resetChannelOverride(channel.id)}
+                          >
+                            <ArrowPathIcon className="size-4" />
+                          </button>
+                        </div>
+                        <div className="mt-2 grid grid-cols-4 gap-2">
+                          <label className="grid min-w-0 gap-1 text-[10px] text-zinc-500">
+                            <span>Pin 1</span>
+                            <select
+                              aria-label={`${channel.channel_name} Pin 1`}
+                              className={fieldClass}
+                              value={settings.pin1}
+                              onChange={(event) =>
+                                updateChannelOverride(channel, { pin1: Number(event.target.value) })
+                              }
+                            >
+                              {channelPinOptions.map((pin) => (
+                                <option key={pin} value={pin}>D{pin}</option>
+                              ))}
+                            </select>
+                          </label>
+                          <label className="grid min-w-0 gap-1 text-[10px] text-zinc-500">
+                            <span>Pin 2</span>
+                            <select
+                              aria-label={`${channel.channel_name} Pin 2`}
+                              className={fieldClass}
+                              value={settings.pin2}
+                              onChange={(event) =>
+                                updateChannelOverride(channel, { pin2: Number(event.target.value) })
+                              }
+                            >
+                              {channelPinOptions.map((pin) => (
+                                <option key={pin} value={pin}>D{pin}</option>
+                              ))}
+                            </select>
+                          </label>
+                          <label className="grid min-w-0 gap-1 text-[10px] text-zinc-500">
+                            <span>Frequency</span>
+                            <input
+                              aria-label={`${channel.channel_name} frequency in hertz`}
+                              className={fieldClass}
+                              type="number"
+                              inputMode="decimal"
+                              min={bounds.minFrequency}
+                              max={bounds.maxFrequency}
+                              step="any"
+                              value={settings.frequencyHz}
+                              onChange={(event) =>
+                                updateChannelOverride(channel, { frequencyHz: event.target.value })
+                              }
+                            />
+                          </label>
+                          <label className="grid min-w-0 gap-1 text-[10px] text-zinc-500">
+                            <span>Duration</span>
+                            <input
+                              aria-label={`${channel.channel_name} duration in milliseconds`}
+                              className={fieldClass}
+                              type="number"
+                              inputMode="numeric"
+                              min={bounds.minDurationMs}
+                              max={bounds.maxDurationMs}
+                              step="1"
+                              value={settings.durationMs}
+                              onChange={(event) =>
+                                updateChannelOverride(channel, { durationMs: event.target.value })
+                              }
+                            />
+                          </label>
+                        </div>
+                        {invalid && (
+                          <p role="alert" className="mt-1.5 text-[11px] leading-4 text-red-300">
+                            Pins must differ; use {bounds.minFrequency}–{bounds.maxFrequency} Hz and {bounds.minDurationMs}–{bounds.maxDurationMs} whole ms.
+                          </p>
+                        )}
+                      </article>
+                    );
+                  })}
+                </div>
+              )}
+              {!controlChannels.length && (
+                <p className="rounded-lg border border-dashed border-zinc-800 p-4 text-center text-xs text-zinc-500">
+                  No Channels are registered for the selected Species.
+                </p>
+              )}
+            </div>
+          )}
+        </section>
+        <section className="mt-8">
+          <h3>
+          <button
+            type="button"
+            className="flex w-full items-center justify-between border-b border-zinc-800 pb-3 text-left"
             aria-expanded={expandedSettingsSection === "control"}
             aria-controls="settings-control"
             onClick={() =>
@@ -1231,6 +1584,7 @@ export function LiveControlPage({ board }: { board: Board | null }) {
                   onChange={(event) => {
                     sendStop();
                     setListeningBehaviorId(null);
+                    setControlSettingsMessage(null);
                     setSelectedSpeciesId(event.target.value ? Number(event.target.value) : null);
                   }}
                 >
@@ -1249,6 +1603,7 @@ export function LiveControlPage({ board }: { board: Board | null }) {
                   onChange={(event) => {
                     sendStop();
                     setListeningBehaviorId(null);
+                    setControlSettingsMessage(null);
                     setControlMethod(event.target.value as ControlMethod);
                     event.currentTarget.blur();
                   }}
@@ -1271,6 +1626,22 @@ export function LiveControlPage({ board }: { board: Board | null }) {
                     Assign gamepad inputs to Behaviors under Shortcut Control below.
                   </p>
                 </div>
+              )}
+              <button
+                type="button"
+                disabled={controlSpeciesId === null}
+                className="flex min-h-10 w-full items-center justify-center rounded-lg border border-zinc-700 bg-zinc-900/70 px-4 text-xs font-medium text-zinc-200 transition-colors hover:border-zinc-600 hover:bg-zinc-800 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                onClick={rememberControlSettings}
+              >
+                Remember Current Settings
+              </button>
+              {controlSettingsMessage && (
+                <p
+                  role="status"
+                  className={`text-xs leading-5 ${controlSettingsMessage.tone === "success" ? "text-green-300" : "text-red-300"}`}
+                >
+                  {controlSettingsMessage.text}
+                </p>
               )}
               <p className="text-xs leading-5 text-zinc-500">
                 The selected Species determines which enabled Behaviors and Channels are available.
@@ -1314,30 +1685,58 @@ export function LiveControlPage({ board }: { board: Board | null }) {
             </p>
           ) : (
             <div className="mt-4 grid gap-4">
-              <label className="grid gap-1.5 text-sm text-zinc-200">
-                <span>Resolution</span>
-                <Select
-                  disabled={cameraSaving}
-                  value={cameraSettings.resolution}
-                  onChange={(event) => {
-                    const resolution = event.target.value;
-                    const maximumFps =
-                      cameraSettings.maxFpsByResolution[resolution] ??
-                      cameraSettings.limits.fps[1];
-                    const fps = Math.min(cameraSettings.fps, maximumFps);
-                    setCameraSettings((current) =>
-                      current ? { ...current, resolution, fps } : current,
-                    );
-                    void saveCameraSettings({ resolution, fps });
-                  }}
-                >
-                  {cameraSettings.supportedResolutions.map((resolution) => (
-                    <option key={resolution} value={resolution}>
-                      {resolution.replace("x", " × ")}
-                    </option>
-                  ))}
-                </Select>
-              </label>
+              <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-end gap-2">
+                <label className="grid min-w-0 gap-1.5 text-sm text-zinc-200">
+                  <span>Resolution</span>
+                  <Select
+                    disabled={cameraSaving}
+                    value={cameraSettings.resolution}
+                    onChange={(event) => {
+                      const resolution = event.target.value;
+                      const maximumFps =
+                        cameraSettings.maxFpsByResolution[resolution] ??
+                        cameraSettings.limits.fps[1];
+                      const fps = Math.min(cameraSettings.fps, maximumFps);
+                      setCameraSettings((current) =>
+                        current ? { ...current, resolution, fps } : current,
+                      );
+                      void saveCameraSettings({ resolution, fps });
+                    }}
+                  >
+                    {cameraSettings.supportedResolutions.map((resolution) => (
+                      <option key={resolution} value={resolution}>
+                        {resolution.replace("x", " × ")}
+                      </option>
+                    ))}
+                  </Select>
+                </label>
+                {(
+                  [
+                    ["hmirror", "H-Mirror"],
+                    ["vflip", "V-Flip"],
+                  ] as const
+                ).map(([key, label]) => (
+                  <label
+                    key={key}
+                    className="flex h-11 items-center gap-2 rounded-md border border-zinc-800 bg-zinc-900/70 px-2.5 text-xs text-zinc-200"
+                  >
+                    <span>{label}</span>
+                    <input
+                      className="size-4 shrink-0 accent-zinc-100 disabled:opacity-50"
+                      type="checkbox"
+                      disabled={cameraSaving}
+                      checked={cameraSettings[key]}
+                      onChange={(event) => {
+                        const checked = event.target.checked;
+                        setCameraSettings((current) =>
+                          current ? { ...current, [key]: checked } : current,
+                        );
+                        void saveCameraSettings({ [key]: checked });
+                      }}
+                    />
+                  </label>
+                ))}
+              </div>
               <CameraRange
                 label="Target FPS"
                 value={cameraSettings.fps}
@@ -1393,34 +1792,6 @@ export function LiveControlPage({ board }: { board: Board | null }) {
                 }
                 onCommit={(sharpness) => void saveCameraSettings({ sharpness })}
               />
-              <div className="grid grid-cols-2 gap-3">
-                {(
-                  [
-                    ["hmirror", "H-Mirror"],
-                    ["vflip", "V-Flip"],
-                  ] as const
-                ).map(([key, label]) => (
-                  <label
-                    key={key}
-                    className="flex items-center justify-between rounded-xl border border-zinc-800 bg-zinc-900/70 p-3 text-sm text-zinc-200"
-                  >
-                    <span>{label}</span>
-                    <input
-                      className="size-4 accent-zinc-100 disabled:opacity-50"
-                      type="checkbox"
-                      disabled={cameraSaving}
-                      checked={cameraSettings[key]}
-                      onChange={(event) => {
-                        const checked = event.target.checked;
-                        setCameraSettings((current) =>
-                          current ? { ...current, [key]: checked } : current,
-                        );
-                        void saveCameraSettings({ [key]: checked });
-                      }}
-                    />
-                  </label>
-                ))}
-              </div>
               {cameraMessage && (
                 <p
                   className={`text-xs ${cameraError ? "text-red-300" : "text-green-300"}`}

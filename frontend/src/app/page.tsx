@@ -26,8 +26,20 @@ export default function Home() {
   const { changeSection, changeWorkspace } = ctx;
   const [activePage, setActivePage] = useState<PageId>("homepage");
   const [controlBoard, setControlBoard] = useState<Board | null>(null);
+  const [liveControlRefreshToken, setLiveControlRefreshToken] = useState(0);
+
+  const openLiveControl = (board: Board | null) => {
+    setControlBoard(board);
+    setLiveControlRefreshToken((current) => current + 1);
+    setActivePage("live-control");
+    changeWorkspace("execute");
+  };
 
   const changePage = (page: PageId) => {
+    if (page === "live-control") {
+      openLiveControl(null);
+      return;
+    }
     setActivePage(page);
     const manageSections: Partial<Record<PageId, string>> = {
       species: "species",
@@ -48,7 +60,7 @@ export default function Home() {
     species: <SpeciesPage ctx={ctx} />,
     subjects: <SubjectsPage ctx={ctx} />,
     "materials-tools": <MaterialsToolsPage />,
-    hardware: <HardwarePage onOpenConsole={(board) => { setControlBoard(board); changePage("live-control"); }} />,
+    hardware: <HardwarePage onOpenConsole={(board) => openLiveControl(board)} />,
     software: <SoftwarePage />,
     positions: <PositionsPage ctx={ctx} />,
     channels: <ChannelsPage />,
@@ -57,7 +69,7 @@ export default function Home() {
     plans: <PlansPage ctx={ctx} />,
     trials: <TrialsPage ctx={ctx} />,
     "signal-generation": <SignalGenerationPage ctx={ctx} />,
-    "live-control": <LiveControlPage board={controlBoard} />,
+    "live-control": <LiveControlPage board={controlBoard} refreshToken={liveControlRefreshToken} />,
     logs: <LogsPage ctx={ctx} />,
   } satisfies Record<PageId, React.ReactNode>;
 

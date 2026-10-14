@@ -282,7 +282,13 @@ function CameraRange({
   );
 }
 
-export function LiveControlPage({ board }: { board: Board | null }) {
+export function LiveControlPage({
+  board,
+  refreshToken,
+}: {
+  board: Board | null;
+  refreshToken: number;
+}) {
   const [now, setNow] = useState<Date | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [expandedSettingsSection, setExpandedSettingsSection] =
@@ -329,7 +335,7 @@ export function LiveControlPage({ board }: { board: Board | null }) {
   const [quickActionNotice, setQuickActionNotice] = useState<string | null>(null);
   const [streamFailed, setStreamFailed] = useState(false);
   const connectionAttempt = useRef(0);
-  const requestedBoard = useRef<string | null | undefined>(undefined);
+  const requestedBoardRefresh = useRef<string | null>(null);
   const stimulationRequest = useRef(0);
   const activeBehaviorTimer = useRef<number | null>(null);
   const quickActionNoticeTimer = useRef<number | null>(null);
@@ -602,8 +608,11 @@ export function LiveControlPage({ board }: { board: Board | null }) {
         const target = discovered.find(
           (item) => normalizedMac(item.mac) === normalizedMac(autoConnectMac),
         );
-        if (!target)
-          throw new Error("The selected board was not found on the current LAN.");
+        if (!target) {
+          setConnectionState("idle");
+          setMessage("The previously selected board was not found. Select an available board.");
+          return;
+        }
         await connectToBoard(target);
         return;
       }
@@ -623,11 +632,12 @@ export function LiveControlPage({ board }: { board: Board | null }) {
 
   useEffect(() => {
     const targetMac = board?.mac ?? null;
-    if (requestedBoard.current === targetMac) return;
-    requestedBoard.current = targetMac;
+    const refreshRequest = `${refreshToken}:${targetMac ?? "none"}`;
+    if (requestedBoardRefresh.current === refreshRequest) return;
+    requestedBoardRefresh.current = refreshRequest;
     const timer = window.setTimeout(() => void discover(targetMac), 0);
     return () => window.clearTimeout(timer);
-  }, [board?.mac, discover]);
+  }, [board?.mac, discover, refreshToken]);
 
   const sendStop = useCallback(
     (keepalive = false) => {

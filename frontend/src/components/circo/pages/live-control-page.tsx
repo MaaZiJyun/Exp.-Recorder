@@ -338,6 +338,9 @@ export function LiveControlPage({
   const requestedBoardRefresh = useRef<string | null>(null);
   const stimulationRequest = useRef(0);
   const activeBehaviorTimer = useRef<number | null>(null);
+  const heldBehaviorId = useRef<number | null>(null);
+  const controlSequence = useRef(0);
+  const activeStartRequest = useRef<Promise<void> | null>(null);
   const quickActionNoticeTimer = useRef<number | null>(null);
   const gamepadSupported =
     typeof navigator !== "undefined" && typeof navigator.getGamepads === "function";
@@ -641,10 +644,24 @@ export function LiveControlPage({
 
   const sendStop = useCallback(
     (keepalive = false) => {
+      const pendingStart = activeStartRequest.current;
+      heldBehaviorId.current = null;
+      const stopSequence = ++controlSequence.current;
       stimulationRequest.current += 1;
       clearActiveBehavior();
-      if (endpoint)
+      if (endpoint) {
         void requestStimulationStop(endpoint, keepalive).catch(() => undefined);
+        if (pendingStart) {
+          void pendingStart.finally(() => {
+            if (
+              controlSequence.current === stopSequence &&
+              heldBehaviorId.current === null
+            ) {
+              void requestStimulationStop(endpoint, keepalive).catch(() => undefined);
+            }
+          });
+        }
+      }
     },
     [clearActiveBehavior, endpoint],
   );
@@ -749,6 +766,30 @@ export function LiveControlPage({
       }
     },
     [boardPickerOpen, channelOverrides, channels, clearActiveBehavior, controllerConfig, controlSpeciesId, endpoint],
+  );
+
+  const pressBehavior = useCallback(
+    (behavior: Behavior) => {
+      if (heldBehaviorId.current === behavior.id) return;
+      heldBehaviorId.current = behavior.id;
+      controlSequence.current += 1;
+      const request = startBehavior(behavior);
+      activeStartRequest.current = request;
+      void request.finally(() => {
+        if (activeStartRequest.current === request) {
+          activeStartRequest.current = null;
+        }
+      });
+    },
+    [startBehavior],
+  );
+
+  const releaseBehavior = useCallback(
+    (behaviorId: number, keepalive = false) => {
+      if (heldBehaviorId.current !== behaviorId) return;
+      sendStop(keepalive);
+    },
+    [sendStop],
   );
 
   const saveCameraSettings = useCallback(
@@ -908,8 +949,10 @@ export function LiveControlPage({
       const nextBehavior = behavior?.id ?? null;
 
       if (nextBehavior !== activeBehavior) {
+        const previousBehavior = activeBehavior;
         activeBehavior = nextBehavior;
-        if (behavior) void startBehavior(behavior);
+        if (behavior) pressBehavior(behavior);
+        else if (previousBehavior !== null) releaseBehavior(previousBehavior);
       }
       animationFrame = window.requestAnimationFrame(pollGamepad);
     };
@@ -917,8 +960,9 @@ export function LiveControlPage({
     animationFrame = window.requestAnimationFrame(pollGamepad);
     return () => {
       window.cancelAnimationFrame(animationFrame);
+      if (activeBehavior !== null) releaseBehavior(activeBehavior, true);
     };
-  }, [controlMethod, enabledBehaviors, listeningBehaviorId, shortcutForBehavior, startBehavior]);
+  }, [controlMethod, enabledBehaviors, listeningBehaviorId, pressBehavior, releaseBehavior, shortcutForBehavior]);
 
   useEffect(() => {
     if (controlMethod !== "keyboard" || listeningBehaviorId !== null) return;
@@ -932,28 +976,46 @@ export function LiveControlPage({
       );
     const onKeyDown = (event: KeyboardEvent) => {
       if (editable(event.target) || event.repeat) return;
-      const behavior = findBehavior(event.key === " " ? "Space" : event.key);
+      const behavior = findBehavior(keyboardShortcut(event));
       if (behavior) {
         event.preventDefault();
-        void startBehavior(behavior);
+        pressBehavior(behavior);
       }
     };
-    const onBlur = () => sendStop(true);
-    const onVisibility = () => {
-      if (document.hidden) sendStop(true);
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (editable(event.target)) return;
+      const behavior = findBehavior(keyboardShortcut(event));
+      if (behavior) {
+        event.preventDefault();
+        releaseBehavior(behavior.id);
+      }
     };
     window.addEventListener("keydown", onKeyDown);
-    window.addEventListener("blur", onBlur);
-    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("keyup", onKeyUp);
     return () => {
       window.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("blur", onBlur);
+      window.removeEventListener("keyup", onKeyUp);
+    };
+  }, [controlMethod, enabledBehaviors, listeningBehaviorId, pressBehavior, releaseBehavior, shortcutForBehavior]);
+
+  useEffect(() => {
+    const stopForInterruption = () => sendStop(true);
+    const onVisibility = () => {
+      if (document.hidden) stopForInterruption();
+    };
+    window.addEventListener("blur", stopForInterruption);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("blur", stopForInterruption);
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [controlMethod, enabledBehaviors, listeningBehaviorId, sendStop, shortcutForBehavior, startBehavior]);
+  }, [sendStop]);
   useEffect(
     () => () => {
+      const pendingStart = activeStartRequest.current;
       stimulationRequest.current += 1;
+      heldBehaviorId.current = null;
+      controlSequence.current += 1;
       if (activeBehaviorTimer.current !== null) {
         window.clearTimeout(activeBehaviorTimer.current);
         activeBehaviorTimer.current = null;
@@ -962,8 +1024,14 @@ export function LiveControlPage({
         window.clearTimeout(quickActionNoticeTimer.current);
         quickActionNoticeTimer.current = null;
       }
-      if (endpoint)
+      if (endpoint) {
         void requestStimulationStop(endpoint, true).catch(() => undefined);
+        if (pendingStart) {
+          void pendingStart.finally(() => {
+            void requestStimulationStop(endpoint, true).catch(() => undefined);
+          });
+        }
+      }
     },
     [endpoint],
   );
@@ -1249,7 +1317,29 @@ export function LiveControlPage({
                 className={`${hudButtonClass(activeBehaviorId === behavior.id)} min-w-20 shrink-0 px-3 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40`}
                 aria-label={`${meta.label}, shortcut ${shortcutLabel(shortcutForBehavior(behavior))}`}
                 title={`${meta.label} · ${shortcutLabel(shortcutForBehavior(behavior))}`}
-                onClick={() => void startBehavior(behavior)}
+                onPointerDown={(event) => {
+                  if (event.button !== 0) return;
+                  event.preventDefault();
+                  event.currentTarget.setPointerCapture(event.pointerId);
+                  pressBehavior(behavior);
+                }}
+                onPointerUp={(event) => {
+                  if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                    event.currentTarget.releasePointerCapture(event.pointerId);
+                  }
+                  releaseBehavior(behavior.id);
+                }}
+                onPointerCancel={() => releaseBehavior(behavior.id)}
+                onKeyDown={(event) => {
+                  if (event.repeat || (event.key !== " " && event.key !== "Enter")) return;
+                  event.preventDefault();
+                  pressBehavior(behavior);
+                }}
+                onKeyUp={(event) => {
+                  if (event.key !== " " && event.key !== "Enter") return;
+                  event.preventDefault();
+                  releaseBehavior(behavior.id);
+                }}
               >
                 <span>{meta.label}</span>
               </button>
@@ -1530,9 +1620,9 @@ export function LiveControlPage({
                             />
                           </label>
                           <label className="grid min-w-0 gap-1 text-[10px] text-zinc-500">
-                            <span>Duration</span>
+                            <span>Max Duration</span>
                             <input
-                              aria-label={`${channel.channel_name} duration in milliseconds`}
+                              aria-label={`${channel.channel_name} maximum duration in milliseconds`}
                               className={fieldClass}
                               type="number"
                               inputMode="numeric"

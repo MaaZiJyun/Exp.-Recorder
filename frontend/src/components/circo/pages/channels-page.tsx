@@ -44,7 +44,7 @@ function ChannelInfo({ channel }: { channel: StimulationChannel }) {
     <InfoRow label={`D${channel.channel_pin_1}`}>{channel.channel_pin_1_position_code}</InfoRow>
     <InfoRow label={`D${channel.channel_pin_2}`}>{channel.channel_pin_2_position_code}</InfoRow>
     <InfoRow label="Frequency">{channel.channel_freq_hz} Hz</InfoRow>
-    <InfoRow label="Stim Duration">{channel.channel_stim_duration_ms} ms</InfoRow>
+    <InfoRow label="Max Stim Duration">{channel.channel_stim_duration_ms} ms</InfoRow>
     <InfoRow label="Created">{new Date(channel.created_at).toLocaleString()}</InfoRow>
     <InfoRow label="Updated">{new Date(channel.updated_at).toLocaleString()}</InfoRow>
   </dl>;
@@ -57,7 +57,7 @@ const columns: DataTableColumn<StimulationChannel>[] = [
   { key: "pin1", header: "Pin 1 → Position", cell: (channel) => <span className="font-mono text-xs">D{channel.channel_pin_1} → {channel.channel_pin_1_position_code}</span>, searchValue: (channel) => `D${channel.channel_pin_1} ${channel.channel_pin_1_position_code}` },
   { key: "pin2", header: "Pin 2 → Position", cell: (channel) => <span className="font-mono text-xs">D{channel.channel_pin_2} → {channel.channel_pin_2_position_code}</span>, searchValue: (channel) => `D${channel.channel_pin_2} ${channel.channel_pin_2_position_code}` },
   { key: "frequency", header: "Frequency", cell: (channel) => `${channel.channel_freq_hz} Hz`, searchValue: (channel) => channel.channel_freq_hz },
-  { key: "duration", header: "Duration", cell: (channel) => `${channel.channel_stim_duration_ms} ms`, searchValue: (channel) => channel.channel_stim_duration_ms },
+  { key: "duration", header: "Max Duration", cell: (channel) => `${channel.channel_stim_duration_ms} ms`, searchValue: (channel) => channel.channel_stim_duration_ms },
 ];
 
 export function ChannelsPage() {
@@ -172,7 +172,7 @@ export function ChannelsPage() {
   );
 
   return <div className="grid min-w-0 gap-8">
-    <PageHeader eyebrow="Method" title="Channels" subtitle="Register species-specific stimulation channels, pin mappings, positions, frequency, and duration." />
+    <PageHeader eyebrow="Method" title="Channels" subtitle="Register species-specific stimulation channels, pin mappings, positions, frequency, and maximum stimulation duration." />
     {message ? <Alert tone={message.tone}>{message.text}</Alert> : null}
     <Card>
       <Field label="Species">
@@ -230,7 +230,7 @@ export function ChannelsPage() {
         {draft.species_id && availablePositions.length < 2 ? <Alert tone="warning">This Species needs at least two registered Positions before a Channel can be saved.</Alert> : null}
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Frequency (Hz)"><Input required type="number" min="0.001" step="any" value={draft.channel_freq_hz} onChange={(event) => setDraft((current) => ({ ...current, channel_freq_hz: event.target.value }))} /></Field>
-          <Field label="Stimulation Duration (ms)"><Input required type="number" min="1" step="1" value={draft.channel_stim_duration_ms} onChange={(event) => setDraft((current) => ({ ...current, channel_stim_duration_ms: event.target.value }))} /></Field>
+          <Field label="Maximum Stimulation Duration (ms)"><Input required type="number" min="1" step="1" value={draft.channel_stim_duration_ms} onChange={(event) => setDraft((current) => ({ ...current, channel_stim_duration_ms: event.target.value }))} /></Field>
         </div>
         <div className="flex justify-end gap-2"><Button type="button" variant="secondary" onClick={() => setEditorId(undefined)}>Cancel</Button><Button type="submit" disabled={saving || !canSave}>{saving ? "Saving…" : "Save Channel"}</Button></div>
       </form>

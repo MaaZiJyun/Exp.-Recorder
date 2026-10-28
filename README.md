@@ -104,8 +104,10 @@ Hardware 页面还提供 XIAO ESP32S3 健康检查：
 - 在 Control Settings 选择 Species，并切换屏幕按钮、Keyboard 或 USB Gamepad 控制方式。
 - USB Gamepad 通过浏览器 Gamepad API 读取；可在 Shortcut Control 点击监听按钮，再按键盘键、手柄按钮、D-pad 或推动左摇杆，为 Behavior 建立临时映射。
 - 在 Shortcut Control 临时覆盖当前物种已启用 Behavior 的快捷键；刷新 Live Control 后恢复数据库中的默认值。
-- 通过界面按钮或键盘快捷键执行数据库中定义的 Behavior。
+- 通过界面按钮、键盘快捷键或 USB Gamepad 按住执行数据库中定义的 Behavior；按下时开始刺激，松开时立即停止。
 - 从数据库加载当前物种的 Behavior 及其双引脚刺激 Channel；只有 `status=on` 的 Behavior 可以在 Live Control 中执行。
+- Channel 的 `channel_stim_duration_ms` 是单次连续刺激的最大安全时长，不是每次操作的固定时长；实际刺激时长为按住时间与该上限中的较小值。
+- Live Control 按下时向板端发送 `POST /stimulation/start`，其中 `durationMs` 为最大时长；松开、页面失焦、切换控制方式或切换物种时发送 `POST /stimulation/stop`。
 - 设置摄像头分辨率、FPS、亮度、对比度、锐度、水平镜像和垂直翻转。
 - 以摄像头最大分辨率拍照、预览并下载 JPEG。
 - 同一控制板的视频流在浏览器标签页之间使用独占锁，避免重复占用流。

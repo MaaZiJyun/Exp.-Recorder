@@ -84,6 +84,36 @@ type StreamStats = {
   stream_id: number;
   frames_sent: number;
 };
+type WifiNetwork = {
+  ssid: string;
+  rssi: number | null;
+};
+type WifiConnectionState = {
+  ok: boolean;
+  connectionState: string;
+  accessPoint: {
+    active: boolean;
+    ssid: string;
+    ip: string;
+  } | null;
+  station: {
+    connected: boolean;
+    ssid: string;
+    ip: string;
+  } | null;
+  error: string | null;
+};
+type WifiAccessPointSettings = {
+  ok: boolean;
+  supportedBands: string[];
+  band: string;
+  channel: number;
+  actualChannel: number;
+  minChannel: number;
+  maxChannel: number;
+  restartPending: boolean;
+  stationOverridesChannel: boolean;
+};
 type DiscoveryResponse = {
   discovered: Array<{
     mac: string;
@@ -216,6 +246,30 @@ function channelOverrideValue(
   };
 }
 
+function parseWifiNetworks(payload: unknown): WifiNetwork[] {
+  const records = Array.isArray(payload)
+    ? payload
+    : payload && typeof payload === "object" && "networks" in payload &&
+        Array.isArray(payload.networks)
+      ? payload.networks
+      : [];
+  const unique = new Map<string, WifiNetwork>();
+  records.forEach((record) => {
+    if (!record || typeof record !== "object" || !("ssid" in record)) return;
+    const ssid = String(record.ssid).trim();
+    if (!ssid) return;
+    const value = "rssi" in record ? Number(record.rssi) : Number.NaN;
+    const network = { ssid, rssi: Number.isFinite(value) ? value : null };
+    const current = unique.get(ssid);
+    if (!current || (network.rssi ?? -Infinity) > (current.rssi ?? -Infinity)) {
+      unique.set(ssid, network);
+    }
+  });
+  return Array.from(unique.values()).sort(
+    (left, right) => (right.rssi ?? -Infinity) - (left.rssi ?? -Infinity),
+  );
+}
+
 async function imageBlobResolution(blob: Blob): Promise<string | null> {
   if (typeof createImageBitmap !== "function") return null;
   try {
@@ -320,6 +374,21 @@ export function LiveControlPage({
   const [cameraSaving, setCameraSaving] = useState(false);
   const [cameraMessage, setCameraMessage] = useState<string | null>(null);
   const [cameraError, setCameraError] = useState(false);
+  const [wifiSettings, setWifiSettings] = useState<WifiConnectionState | null>(null);
+  const [wifiNetworks, setWifiNetworks] = useState<WifiNetwork[]>([]);
+  const [wifiSsid, setWifiSsid] = useState("");
+  const [wifiPassword, setWifiPassword] = useState("");
+  const [wifiScanning, setWifiScanning] = useState(false);
+  const [wifiSaving, setWifiSaving] = useState(false);
+  const [wifiPolling, setWifiPolling] = useState(false);
+  const [wifiMessage, setWifiMessage] = useState<string | null>(null);
+  const [wifiError, setWifiError] = useState(false);
+  const [accessPointSettings, setAccessPointSettings] =
+    useState<WifiAccessPointSettings | null>(null);
+  const [accessPointChannel, setAccessPointChannel] = useState("6");
+  const [accessPointSaving, setAccessPointSaving] = useState(false);
+  const [accessPointMessage, setAccessPointMessage] = useState<string | null>(null);
+  const [accessPointError, setAccessPointError] = useState(false);
   const [streamVersion, setStreamVersion] = useState(() => String(Date.now()));
   const [frameRate, setFrameRate] = useState<{ url: string | null; value: number | null }>({ url: null, value: null });
   const previousStreamStats = useRef<{ streamId: number; framesSent: number; timestamp: number } | null>(null);
@@ -359,6 +428,12 @@ export function LiveControlPage({
         behavior.species_id === controlSpeciesId && behavior.status === "on",
     ),
     [behaviors, controlSpeciesId],
+  );
+  const usingBoardAccessPoint = Boolean(
+    endpoint &&
+      (endpoint.ipAddress === "192.168.4.1" ||
+        (wifiSettings?.accessPoint?.active &&
+          endpoint.ipAddress === wifiSettings.accessPoint.ip)),
   );
   const shortcutForBehavior = useCallback(
     (behavior: Behavior) =>
@@ -863,6 +938,243 @@ export function LiveControlPage({
       setPhotoCapturing(false);
     }
   }, [endpoint, photoCapturing]);
+
+  const loadWifiSettings = useCallback(async (quiet = false) => {
+    if (!endpoint) return null;
+    if (!quiet) {
+      setWifiMessage("Loading Wi-Fi status…");
+      setWifiError(false);
+    }
+    try {
+      const response = await fetch(
+        `http://${endpoint.ipAddress}:${endpoint.controlPort}/wifi/settings`,
+        { cache: "no-store" },
+      );
+      if (!response.ok) {
+        throw new Error(
+          (await response.text()) || `Wi-Fi status request failed (${response.status})`,
+        );
+      }
+      const settings = (await response.json()) as WifiConnectionState;
+      setWifiSettings(settings);
+      setWifiError(settings.connectionState === "failed");
+      if (settings.connectionState === "connected" && settings.station?.connected) {
+        setWifiMessage(
+          `Connected to ${settings.station.ssid} at ${settings.station.ip}. Join that network before the board hotspot closes.`,
+        );
+      } else if (settings.connectionState === "failed") {
+        setWifiMessage(settings.error || "The board could not connect to that Wi-Fi network.");
+      } else if (settings.connectionState === "connecting") {
+        setWifiMessage("The board is connecting. Stimulation and camera controls remain available.");
+      } else if (!quiet) {
+        setWifiMessage("Wi-Fi status synchronized.");
+      }
+      return settings;
+    } catch (error) {
+      if (!quiet) {
+        setWifiMessage(error instanceof Error ? error.message : "Failed to load Wi-Fi status.");
+        setWifiError(true);
+      }
+      return null;
+    }
+  }, [endpoint]);
+
+  const loadAccessPointSettings = useCallback(async () => {
+    if (!endpoint) return null;
+    try {
+      const response = await fetch(
+        `http://${endpoint.ipAddress}:${endpoint.controlPort}/wifi/access-point`,
+        { cache: "no-store" },
+      );
+      if (!response.ok) {
+        throw new Error(
+          (await response.text()) ||
+            `Access point settings request failed (${response.status})`,
+        );
+      }
+      const settings = (await response.json()) as WifiAccessPointSettings;
+      setAccessPointSettings(settings);
+      setAccessPointChannel(String(settings.channel));
+      setAccessPointError(false);
+      setAccessPointMessage(null);
+      return settings;
+    } catch (error) {
+      setAccessPointMessage(
+        error instanceof Error
+          ? error.message
+          : "Failed to load access point settings.",
+      );
+      setAccessPointError(true);
+      return null;
+    }
+  }, [endpoint]);
+
+  const saveAccessPointSettings = useCallback(async () => {
+    if (!endpoint || !accessPointSettings || accessPointSaving) return;
+    const channel = Number(accessPointChannel);
+    if (
+      !Number.isInteger(channel) ||
+      channel < accessPointSettings.minChannel ||
+      channel > accessPointSettings.maxChannel
+    ) {
+      setAccessPointMessage(
+        `Choose a channel from ${accessPointSettings.minChannel} to ${accessPointSettings.maxChannel}.`,
+      );
+      setAccessPointError(true);
+      return;
+    }
+    sendStop(true);
+    setAccessPointSaving(true);
+    setAccessPointMessage(`Saving hotspot channel ${channel}…`);
+    setAccessPointError(false);
+    try {
+      const response = await fetch(
+        `http://${endpoint.ipAddress}:${endpoint.controlPort}/wifi/access-point`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ channel }),
+        },
+      );
+      if (!response.ok) {
+        throw new Error(
+          (await response.text()) ||
+            `Access point settings update failed (${response.status})`,
+        );
+      }
+      setAccessPointSettings((current) =>
+        current ? { ...current, channel, restartPending: true } : current,
+      );
+      setAccessPointMessage(
+        accessPointSettings.stationOverridesChannel
+          ? `Channel ${channel} was saved. The connected router currently controls the actual shared radio channel.`
+          : `Channel ${channel} was saved. The hotspot is restarting; reconnect to ${wifiSettings?.accessPoint?.ssid ?? "the board hotspot"}.`,
+      );
+    } catch (error) {
+      setAccessPointMessage(
+        error instanceof Error
+          ? error.message
+          : "Failed to update access point settings.",
+      );
+      setAccessPointError(true);
+    } finally {
+      setAccessPointSaving(false);
+    }
+  }, [accessPointChannel, accessPointSaving, accessPointSettings, endpoint, sendStop, wifiSettings]);
+
+  const scanWifiNetworks = useCallback(async () => {
+    if (!endpoint || wifiScanning) return;
+    setWifiScanning(true);
+    setWifiMessage("Scanning nearby Wi-Fi networks…");
+    setWifiError(false);
+    try {
+      const response = await fetch(
+        `http://${endpoint.ipAddress}:${endpoint.controlPort}/wifi/networks`,
+        { cache: "no-store" },
+      );
+      if (!response.ok) {
+        throw new Error(
+          (await response.text()) || `Wi-Fi scan failed (${response.status})`,
+        );
+      }
+      const networks = parseWifiNetworks(await response.json());
+      setWifiNetworks(networks);
+      setWifiMessage(
+        networks.length
+          ? `Found ${networks.length} Wi-Fi network${networks.length === 1 ? "" : "s"}.`
+          : "No named Wi-Fi networks were found. You can enter a hidden SSID manually.",
+      );
+    } catch (error) {
+      setWifiMessage(error instanceof Error ? error.message : "Wi-Fi scan failed.");
+      setWifiError(true);
+    } finally {
+      setWifiScanning(false);
+    }
+  }, [endpoint, wifiScanning]);
+
+  const saveWifiSettings = useCallback(async () => {
+    const ssid = wifiSsid.trim();
+    if (!endpoint || !ssid || wifiSaving || wifiPolling) return;
+    sendStop(true);
+    setWifiSaving(true);
+    setWifiMessage(`Sending credentials for ${ssid}…`);
+    setWifiError(false);
+    try {
+      const response = await fetch(
+        `http://${endpoint.ipAddress}:${endpoint.controlPort}/wifi/settings`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ssid, password: wifiPassword }),
+        },
+      );
+      if (!response.ok) {
+        throw new Error(
+          (await response.text()) || `Wi-Fi settings update failed (${response.status})`,
+        );
+      }
+      setWifiPassword("");
+      setWifiMessage(`Connecting to ${ssid}…`);
+      setWifiPolling(true);
+    } catch (error) {
+      setWifiMessage(
+        error instanceof Error ? error.message : "Failed to update Wi-Fi settings.",
+      );
+      setWifiError(true);
+    } finally {
+      setWifiSaving(false);
+    }
+  }, [endpoint, sendStop, wifiPassword, wifiPolling, wifiSaving, wifiSsid]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setWifiSettings(null);
+      setWifiNetworks([]);
+      setWifiPolling(false);
+      setWifiMessage(null);
+      setWifiError(false);
+      setAccessPointSettings(null);
+      setAccessPointMessage(null);
+      setAccessPointError(false);
+      if (endpoint) {
+        void Promise.all([loadWifiSettings(), loadAccessPointSettings()]);
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [endpoint, loadAccessPointSettings, loadWifiSettings]);
+
+  useEffect(() => {
+    if (!endpoint || !wifiPolling) return;
+    let active = true;
+    let timer = 0;
+    let attempts = 0;
+    const poll = async () => {
+      attempts += 1;
+      const settings = await loadWifiSettings(true);
+      if (!active) return;
+      if (
+        settings?.connectionState === "connected" ||
+        settings?.connectionState === "failed"
+      ) {
+        setWifiPolling(false);
+        return;
+      }
+      if (attempts >= 15) {
+        setWifiPolling(false);
+        setWifiError(true);
+        setWifiMessage(
+          "The board did not report a final Wi-Fi state. Reconnect to its hotspot and check the status again.",
+        );
+        return;
+      }
+      timer = window.setTimeout(() => void poll(), 1000);
+    };
+    timer = window.setTimeout(() => void poll(), 600);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [endpoint, loadWifiSettings, wifiPolling]);
 
   useEffect(() => {
     const supported = typeof navigator.getGamepads === "function";
@@ -1515,6 +1827,226 @@ export function LiveControlPage({
               />
               Switch Board
             </button>
+            <div className="mt-5 border-t border-zinc-800 pt-5">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h4 className="text-xs font-semibold uppercase tracking-[.1em] text-zinc-200">
+                    Board Wi-Fi
+                  </h4>
+                  <p className="mt-1 text-[11px] leading-4 text-zinc-500">
+                    Configure the network directly on the connected board.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  disabled={!endpoint || wifiScanning || wifiPolling}
+                  className="inline-flex min-h-8 shrink-0 items-center gap-1.5 rounded-md border border-zinc-700 px-2.5 text-[11px] font-medium text-zinc-300 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
+                  onClick={() => void scanWifiNetworks()}
+                >
+                  <ArrowPathIcon className={`size-3.5 ${wifiScanning ? "animate-spin" : ""}`} />
+                  Scan
+                </button>
+              </div>
+
+              {wifiSettings && (
+                <dl className="mt-4 grid gap-2 rounded-lg border border-zinc-800 bg-zinc-900/60 p-3 text-[11px]">
+                  <div className="flex justify-between gap-3">
+                    <dt className="text-zinc-500">Connection state</dt>
+                    <dd className={wifiSettings.connectionState === "connected" ? "text-green-300" : wifiSettings.connectionState === "failed" ? "text-red-300" : "text-amber-300"}>
+                      {wifiSettings.connectionState}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <dt className="text-zinc-500">Access point</dt>
+                    <dd className="text-right text-zinc-300">
+                      {wifiSettings.accessPoint?.active
+                        ? `${wifiSettings.accessPoint.ssid} · ${wifiSettings.accessPoint.ip}`
+                        : "Inactive"}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <dt className="text-zinc-500">Station</dt>
+                    <dd className="text-right text-zinc-300">
+                      {wifiSettings.station?.connected
+                        ? `${wifiSettings.station.ssid} · ${wifiSettings.station.ip}`
+                        : "Not connected"}
+                    </dd>
+                  </div>
+                </dl>
+              )}
+
+              <form
+                className="mt-4 grid gap-3"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void saveWifiSettings();
+                }}
+              >
+                <label className="grid gap-1 text-[11px] text-zinc-400">
+                  <span>Wi-Fi name (SSID)</span>
+                  <input
+                    required
+                    list="live-control-wifi-networks"
+                    className="min-h-10 w-full rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-950 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/30"
+                    value={wifiSsid}
+                    onChange={(event) => setWifiSsid(event.target.value)}
+                    placeholder="Select or enter a network"
+                    autoComplete="off"
+                  />
+                  <datalist id="live-control-wifi-networks">
+                    {wifiNetworks.map((network) => (
+                      <option key={network.ssid} value={network.ssid}>
+                        {network.rssi === null ? network.ssid : `${network.rssi} dBm`}
+                      </option>
+                    ))}
+                  </datalist>
+                </label>
+                <label className="grid gap-1 text-[11px] text-zinc-400">
+                  <span>Password</span>
+                  <input
+                    type="password"
+                    className="min-h-10 w-full rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-950 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/30"
+                    value={wifiPassword}
+                    onChange={(event) => setWifiPassword(event.target.value)}
+                    placeholder="Leave empty for an open network"
+                    autoComplete="new-password"
+                  />
+                </label>
+                <button
+                  type="submit"
+                  disabled={!endpoint || !wifiSsid.trim() || wifiSaving || wifiPolling}
+                  className="flex min-h-10 w-full items-center justify-center rounded-lg bg-white px-4 text-xs font-semibold text-zinc-950 hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {wifiSaving
+                    ? "Sending…"
+                    : wifiPolling
+                      ? "Connecting…"
+                      : "Connect Board to Wi-Fi"}
+                </button>
+              </form>
+
+              {wifiMessage && (
+                <p
+                  role="status"
+                  className={`mt-3 text-[11px] leading-5 ${wifiError ? "text-red-300" : wifiPolling ? "text-amber-300" : "text-zinc-400"}`}
+                >
+                  {wifiMessage}
+                </p>
+              )}
+
+              {usingBoardAccessPoint && (
+                <div className="mt-5 border-t border-zinc-800 pt-5">
+                  <h5 className="text-xs font-semibold uppercase tracking-[.1em] text-zinc-200">
+                    Hotspot Settings
+                  </h5>
+                  <p className="mt-1 text-[11px] leading-4 text-zinc-500">
+                    ESP32-S3 hotspots use 2.4 GHz. Changing the channel restarts the hotspot and may disconnect this device.
+                  </p>
+
+                  {accessPointSettings ? (
+                    <>
+                      <dl className="mt-3 grid gap-2 rounded-lg border border-zinc-800 bg-zinc-900/60 p-3 text-[11px]">
+                        <div className="flex justify-between gap-3">
+                          <dt className="text-zinc-500">Supported band</dt>
+                          <dd className="text-zinc-300">
+                            {accessPointSettings.supportedBands.join(", ") || accessPointSettings.band}
+                          </dd>
+                        </div>
+                        <div className="flex justify-between gap-3">
+                          <dt className="text-zinc-500">Saved channel</dt>
+                          <dd className="font-mono text-zinc-300">
+                            {accessPointSettings.channel}
+                          </dd>
+                        </div>
+                        <div className="flex justify-between gap-3">
+                          <dt className="text-zinc-500">Actual channel</dt>
+                          <dd className="font-mono text-zinc-300">
+                            {accessPointSettings.actualChannel}
+                          </dd>
+                        </div>
+                      </dl>
+
+                      {accessPointSettings.stationOverridesChannel && (
+                        <p className="mt-3 rounded-lg border border-amber-900/70 bg-amber-950/30 p-3 text-[11px] leading-5 text-amber-200">
+                          Station mode is active. The external router controls the actual shared Wi-Fi channel; this setting takes effect when the hotspot runs independently.
+                        </p>
+                      )}
+
+                      <form
+                        className="mt-3 grid grid-cols-[minmax(0,1fr)_auto] gap-2"
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          void saveAccessPointSettings();
+                        }}
+                      >
+                        <label className="grid gap-1 text-[11px] text-zinc-400">
+                          <span>Hotspot channel</span>
+                          <select
+                            className="min-h-10 w-full rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-950 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/30"
+                            value={accessPointChannel}
+                            onChange={(event) => setAccessPointChannel(event.target.value)}
+                          >
+                            {Array.from(
+                              {
+                                length:
+                                  accessPointSettings.maxChannel -
+                                  accessPointSettings.minChannel +
+                                  1,
+                              },
+                              (_, index) => accessPointSettings.minChannel + index,
+                            ).map((channel) => (
+                              <option key={channel} value={channel}>
+                                Channel {channel}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <button
+                          type="submit"
+                          disabled={accessPointSaving}
+                          className="mt-[19px] min-h-10 rounded-lg border border-zinc-600 px-3 text-xs font-medium text-zinc-200 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          {accessPointSaving ? "Saving…" : "Apply"}
+                        </button>
+                      </form>
+                    </>
+                  ) : (
+                    <p className="mt-3 text-[11px] text-zinc-500">
+                      {accessPointError
+                        ? "Hotspot settings are unavailable."
+                        : "Loading hotspot settings…"}
+                    </p>
+                  )}
+
+                  {accessPointMessage && (
+                    <p
+                      role="status"
+                      className={`mt-3 text-[11px] leading-5 ${accessPointError ? "text-red-300" : "text-amber-300"}`}
+                    >
+                      {accessPointMessage}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {wifiSettings?.station?.connected &&
+                wifiSettings.station.ip &&
+                wifiSettings.station.ip !== endpoint?.ipAddress && (
+                  <button
+                    type="button"
+                    className="mt-3 flex min-h-9 w-full items-center justify-center rounded-lg border border-green-800 bg-green-950/40 px-3 text-xs font-medium text-green-200 hover:bg-green-900/50"
+                    onClick={() => {
+                      if (!endpoint || !wifiSettings.station) return;
+                      void connectToBoard({
+                        ...endpoint,
+                        ipAddress: wifiSettings.station.ip,
+                      });
+                    }}
+                  >
+                    Use Station IP · {wifiSettings.station.ip}
+                  </button>
+                )}
+            </div>
             </div>
           )}
         </section>

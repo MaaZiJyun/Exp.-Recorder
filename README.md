@@ -108,6 +108,8 @@ Hardware 页面还提供 XIAO ESP32S3 健康检查：
 - 从数据库加载当前物种的 Behavior 及其双引脚刺激 Channel；只有 `status=on` 的 Behavior 可以在 Live Control 中执行。
 - Channel 的 `channel_stim_duration_ms` 是单次连续刺激的最大安全时长，不是每次操作的固定时长；实际刺激时长为按住时间与该上限中的较小值。
 - Live Control 按下时向板端发送 `POST /stimulation/start`，其中 `durationMs` 为最大时长；松开、页面失焦、切换控制方式或切换物种时发送 `POST /stimulation/stop`。
+- 可在 Connection → Board Wi-Fi 扫描附近网络、提交板端 Wi-Fi 凭据并轮询连接状态；连接成功后会显示新的 Station IP，热点关闭前仍可通过 `192.168.4.1` 控制板子。
+- 通过板子热点控制时，Connection → Hotspot Settings 可读取 2.4 GHz 热点的保存信道和实际信道，并在信道 1～13 之间切换；保存后需等待热点重启并重新连接。
 - 设置摄像头分辨率、FPS、亮度、对比度、锐度、水平镜像和垂直翻转。
 - 以摄像头最大分辨率拍照、预览并下载 JPEG。
 - 同一控制板的视频流在浏览器标签页之间使用独占锁，避免重复占用流。
